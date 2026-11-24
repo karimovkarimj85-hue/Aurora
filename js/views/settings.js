@@ -2,7 +2,9 @@ import {
   state, saveSettings, exportData, importData, resetAll, archived, save, remove, piggySaved, active, byId,
 } from '../store.js';
 import { businessForm } from '../bizforms.js';
-import { wordmark } from '../icons.js';
+import { wordmark, tile } from '../icons.js';
+import { currentModel } from '../localai.js';
+import { localAiSheet } from '../localaiui.js';
 import { APP_VERSION } from '../version.js';
 import { checkForUpdate } from '../update.js';
 import { icon } from '../icons.js';
@@ -43,8 +45,14 @@ export function render() {
     <button class="btn btn-ghost btn-block" data-action="add-biz">＋ Добавить бизнес</button>
   </section>
 
+  <section class="card">
+    <h3 class="card-title">ИИ без ключа</h3>
+    <div class="row gap">${tile('sparkles')}<div class="grow"><b>ИИ на телефоне</b><p class="muted small">${currentModel() ? 'Включён · бесплатно, работает на iPhone' : 'Бесплатная модель прямо на iPhone, без ключа и сервера'}</p></div></div>
+    <button class="btn ${currentModel() ? 'btn-ghost' : 'btn-primary'} btn-block" data-action="ai-local">${currentModel() ? 'Настроить' : 'Включить'}</button>
+  </section>
+
   <form class="card form" id="ai-form">
-    <h3 class="card-title">ИИ (Claude)</h3>
+    <h3 class="card-title">ИИ Claude (по ключу API)</h3>
     <label class="field"><span>Ключ API Anthropic</span>
       <input name="apiKey" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" value="${esc(s.apiKey)}" placeholder="sk-ant-..."></label>
     <div class="hint ai-explain">
@@ -107,6 +115,7 @@ export function mount(container) {
 }
 
 export const actions = {
+  'ai-local': (_el, _e, rerender) => localAiSheet({ onChange: rerender }),
   'check-update': () => checkForUpdate({ manual: true }),
   'add-biz': () => businessForm(),
   'edit-biz': (el) => businessForm(byId('businesses', el.dataset.id)),

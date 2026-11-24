@@ -2,7 +2,7 @@ import {
   state, active, totalBalance, totalSaved, monthStats, todayTasks, isDone, toggleTask,
   goalProgress, streak, byId, bizMonthStats, duePayments, clientName,
 } from '../store.js';
-import { icon, tile } from '../icons.js';
+import { icon, tile, GOAL_COLOR } from '../icons.js';
 import { dueSteps } from '../deals.js';
 import { smartTips, dailyTip } from '../tips.js';
 import { money, moneyShort, greeting, esc, today, fullDate } from '../util.js';
@@ -39,15 +39,15 @@ export function render() {
   </section>
 
   <section class="quick">
-    <button class="quick-btn" data-action="add-expense"><span class="q-ic">${icon('arrowUp', { size: 20, w: 2.2 })}</span>Расход</button>
-    <button class="quick-btn" data-action="add-income"><span class="q-ic">${icon('arrowDown', { size: 20, w: 2.2 })}</span>Доход</button>
-    <button class="quick-btn" data-action="add-task"><span class="q-ic">${icon('check', { size: 20, w: 2.4 })}</span>Задача</button>
-    <button class="quick-btn" data-action="add-metric"><span class="q-ic">${icon('scale', { size: 20, w: 2 })}</span>Замер</button>
+    <button class="quick-btn" data-action="add-expense"><span class="q-ic" style="--tile:var(--c-red)">${icon('arrowUp', { size: 20, w: 2.4 })}</span>Расход</button>
+    <button class="quick-btn" data-action="add-income"><span class="q-ic" style="--tile:var(--c-green)">${icon('arrowDown', { size: 20, w: 2.4 })}</span>Доход</button>
+    <button class="quick-btn" data-action="add-task"><span class="q-ic" style="--tile:var(--c-blue)">${icon('check', { size: 20, w: 2.6 })}</span>Задача</button>
+    <button class="quick-btn" data-action="add-metric"><span class="q-ic" style="--tile:var(--c-orange)">${icon('scale', { size: 20, w: 2.2 })}</span>Замер</button>
   </section>
 
   ${tips.length ? `<section class="section">
     <h2 class="section-title">Подсказки</h2>
-    <div class="tips">${tips.map((t) => `<button class="tip" data-action="nav" data-to="${t.tab}"><span class="tip-icon">${icon(t.icon, { size: 20 })}</span><span>${esc(t.text)}</span></button>`).join('')}</div>
+    <div class="tips">${tips.map((t) => `<button class="tip" data-action="nav" data-to="${t.tab}">${tile(t.icon)}<span>${esc(t.text)}</span></button>`).join('')}</div>
   </section>` : ''}
 
   <section class="section">
@@ -68,7 +68,7 @@ export function render() {
     <div class="section-head"><h2 class="section-title">Цели</h2><button class="link" data-action="nav" data-to="goals">Все цели</button></div>
     ${goals.length ? `<div class="hscroll">${goals.map((g) => `
       <button class="goal-mini card" data-action="nav" data-to="goals">
-        ${ring(goalProgress(g), 54, 6)}
+        ${ring(goalProgress(g), 54, 6, GOAL_COLOR[g.kind])}
         <span class="goal-mini-title">${esc(g.title)}</span>
       </button>`).join('')}</div>` : `<button class="card empty-mini" data-action="add-goal">Поставь первую цель</button>`}
   </section>

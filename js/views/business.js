@@ -2,7 +2,8 @@ import {
   state, active, byId, DEAL_STAGES, CLIENT_STATUS, PERIODS, bizMonthStats, bizTrend, mrr, activeSubs,
   duePayments, pipeline, bizBalance, clientName, sortedTransactions,
 } from '../store.js';
-import { tile, catIcon } from '../icons.js';
+import { tile, catTile, catColor } from '../icons.js';
+const STAGE_COLOR = { lead: 'gray', talks: 'blue', demo: 'indigo', invoice: 'orange', won: 'green', lost: 'red' };
 import { esc, money, moneyShort, humanDate, today, monthName, pct } from '../util.js';
 import { emptyState, bar, openSheet } from '../ui.js';
 import { columns, hbars } from '../charts.js';
@@ -57,7 +58,7 @@ function overview(b) {
     <section class="section">
       <div class="section-head"><h2 class="section-title">Воронка продаж</h2><button class="link" data-action="seg" data-seg="deals">Сделки</button></div>
       <div class="card">
-        ${pipe.some((p) => p.count) ? `${hbars(pipe.filter((p) => p.count).map((p) => ({ label: `${p.name} · ${p.count}`, value: p.sum || 0.0001 })), (v) => (v < 1 ? '—' : money(v)))}
+        ${pipe.some((p) => p.count) ? `${hbars(pipe.filter((p) => p.count).map((p) => ({ label: `${p.name} · ${p.count}`, value: p.sum || 0.0001, color: STAGE_COLOR[p.id] })), (v) => (v < 1 ? '—' : money(v)))}
           <p class="muted small">В работе: <b>${money(openSum)}</b></p>` : '<p class="muted small">Сделок пока нет. Добавь первую: «2 кассы для кафе», «CRM на 5 пользователей».</p>'}
       </div>
     </section>
@@ -155,7 +156,7 @@ function finView(b) {
     <button class="btn btn-ghost btn-block" data-action="biz-draw">Вывести прибыль на личный счёт</button>
     <section class="card mt">
       <h3 class="card-title">Расходы за ${monthName(today().slice(0, 7)).toLowerCase()}</h3>
-      ${m.cats.length ? hbars(m.cats.map((c) => ({ label: c.cat.name, value: c.sum })), money) : '<p class="muted small">Расходов в этом месяце нет</p>'}
+      ${m.cats.length ? hbars(m.cats.map((c) => ({ label: c.cat.name, value: c.sum, color: catColor(c.cat) })), money) : '<p class="muted small">Расходов в этом месяце нет</p>'}
     </section>
     <h2 class="section-title">Операции</h2>
     ${list.length ? `<ul class="list card">${list.map((t) => {
@@ -164,7 +165,7 @@ function finView(b) {
       const title = isT ? 'Перевод' : (c?.name || 'Операция');
       const sub = [humanDate(t.date), t.note, isT ? `${byId('accounts', t.accountId)?.name || ''} → ${byId('accounts', t.toAccountId)?.name || ''}` : ''].filter(Boolean).join(' · ');
       const amt = isT ? money(t.amount) : money(t.type === 'income' ? t.amount : -t.amount, { sign: true });
-      return `<li class="row-item" data-action="edit-tx" data-id="${t.id}">${tile(isT ? 'repeat' : catIcon(c))}
+      return `<li class="row-item" data-action="edit-tx" data-id="${t.id}">${isT ? tile('repeat', '', 'gray') : catTile(c)}
         <div class="grow"><span class="row-title">${esc(title)}</span><span class="row-sub">${esc(sub)}</span></div>
         <span class="row-amount ${t.type === 'income' ? 'pos' : ''}">${amt}</span></li>`;
     }).join('')}</ul>` : '<p class="muted center pad">Операций пока нет</p>'}`;

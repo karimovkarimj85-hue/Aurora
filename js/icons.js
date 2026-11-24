@@ -92,7 +92,28 @@ const PIGGY_LEGACY = { '🐷': 'piggy', '🏠': 'house', '🚗': 'car', '✈️'
 export const piggyIcon = (p) => p?.icon || PIGGY_LEGACY[p?.emoji] || 'piggy';
 
 /** Квадратная плашка с иконкой (как в «Настройках» iOS) */
-export const tile = (name, cls = '') => `<span class="row-icon ${cls}">${icon(name, { size: 18 })}</span>`;
+// Цвета плашек: системная палитра Apple (сплошные цвета, без градиентов), адаптируются к тёмной теме
+export const ICON_COLOR = {
+  cart: 'green', cup: 'orange', car: 'blue', house: 'brown', heart: 'pink', bolt: 'red', book: 'indigo', shirt: 'purple',
+  game: 'teal', phoneapp: 'cyan', gift: 'pink', box: 'gray', briefcase: 'green', hammer: 'mint', plus: 'gray', receipt: 'green',
+  repeat: 'cyan', wrench: 'blue', gear: 'gray', people: 'purple', megaphone: 'pink', laptop: 'indigo', building: 'orange',
+  bank: 'indigo', truck: 'teal', paperclip: 'gray', banknote: 'green', creditcard: 'blue', piggy: 'pink', shield: 'teal',
+  plane: 'cyan', graduation: 'indigo', dumbbell: 'orange', brain: 'purple', target: 'blue', clock: 'red', message: 'green',
+  inbox: 'orange', list: 'blue', funnel: 'purple', phone: 'green', person: 'blue', calendar: 'red', trend: 'red',
+  search: 'blue', pencil: 'orange', lightbulb: 'yellow', flame: 'orange', scale: 'orange', checklist: 'blue', star: 'yellow',
+  sparkles: 'indigo', warning: 'red',
+};
+export const CAT_COLOR = {
+  p2p_out: 'gray', p2p_in: 'gray', other_in: 'gray', biz_in_other: 'gray', biz_other: 'gray', other: 'gray',
+  salary: 'green', gift_in: 'pink', side: 'mint', biz_sale: 'green', biz_service: 'teal', biz_purchase: 'brown', loan: 'indigo',
+};
+export const GOAL_COLOR = { body: 'orange', mind: 'purple', money: 'green', custom: 'blue' };
+export const catColor = (cat) => cat?.color || CAT_COLOR[cat?.id] || ICON_COLOR[catIcon(cat)] || 'gray';
+export const colorVar = (c) => `var(--c-${c || 'gray'})`;
+
+/** Квадратная цветная плашка с иконкой (как в «Настройках» iOS) */
+export const tile = (name, cls = '', color = null) => `<span class="row-icon c ${cls}" style="--tile:${colorVar(color || ICON_COLOR[name])}">${icon(name, { size: 18, w: 2 })}</span>`;
+export const catTile = (cat, cls = '') => tile(catIcon(cat), cls, catColor(cat));
 
 /** SVG-иконка. size в px, w — толщина линии */
 export function icon(name, { size = 22, w = 1.8, cls = '' } = {}) {

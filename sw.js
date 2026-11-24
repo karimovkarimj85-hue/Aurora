@@ -1,7 +1,7 @@
 // Service worker Авроры: офлайн-режим и самообновление.
 // Сеть в приоритете (с откатом на кэш), поэтому новая версия приходит сама — без переустановки.
 // При каждом изменении файлов приложения меняй VERSION здесь и APP_VERSION в js/version.js.
-const VERSION = 'aurora-v4.0';
+const VERSION = 'aurora-v4.1';
 const SHELL = [
   './',
   './index.html',
@@ -10,6 +10,9 @@ const SHELL = [
   './js/main.js',
   './js/version.js',
   './js/update.js',
+  './js/localai.js',
+  './js/localaiui.js',
+  './js/llm-worker.js',
   './js/db.js',
   './js/store.js',
   './js/util.js',

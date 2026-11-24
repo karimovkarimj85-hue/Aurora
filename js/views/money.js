@@ -2,7 +2,7 @@ import {
   state, active, byId, accountBalance, piggySaved, piggyMonthlyNeed, monthStats, sortedTransactions,
   totalBalance, totalSaved, remove, personalAccounts, isNeutral,
 } from '../store.js';
-import { tile, catIcon, piggyIcon, ACC_ICON, icon } from '../icons.js';
+import { tile, catIcon, catColor, piggyIcon, ACC_ICON, icon } from '../icons.js';
 import { importSheet, autoImportSheet, inboxSheet } from '../bankui.js';
 import { money, moneyShort, esc, humanDate, monthKey, today, monthName, addDays, pct } from '../util.js';
 import { bar, emptyState, confirmSheet, toast } from '../ui.js';
@@ -36,23 +36,23 @@ function opsView() {
 }
 
 function txRow(t) {
-  let ic = 'box'; let title = ''; let sub = ''; let amountCls = ''; let amount = '';
+  let ic = 'box'; let col = null; let title = ''; let sub = ''; let amountCls = ''; let amount = '';
   const acc = byId('accounts', t.accountId);
   if (t.type === 'transfer') {
-    ic = 'repeat'; title = 'Перевод'; sub = `${acc?.name || '?'} → ${byId('accounts', t.toAccountId)?.name || '?'}`; amount = money(t.amount);
+    ic = 'repeat'; col = 'gray'; title = 'Перевод'; sub = `${acc?.name || '?'} → ${byId('accounts', t.toAccountId)?.name || '?'}`; amount = money(t.amount);
   } else if (t.type === 'piggy') {
     const p = byId('piggies', t.piggyId);
     ic = piggyIcon(p); title = t.amount >= 0 ? `В копилку «${p?.name || '?'}»` : `Из копилки «${p?.name || '?'}»`;
     sub = acc?.name || ''; amount = money(Math.abs(t.amount)); amountCls = 'muted';
   } else {
     const c = byId('categories', t.categoryId);
-    ic = catIcon(c); title = c?.name || 'Без категории'; sub = acc?.name || '';
+    ic = catIcon(c); col = catColor(c); title = c?.name || 'Без категории'; sub = acc?.name || '';
     amount = money(t.type === 'income' ? t.amount : -t.amount, { sign: true });
     amountCls = isNeutral(t.categoryId) ? 'muted' : t.type === 'income' ? 'pos' : '';
   }
   if (t.note) sub = `${t.note}${sub ? ' · ' + sub : ''}`;
   return `<li class="row-item" data-action="edit-tx" data-id="${t.id}">
-    ${tile(ic)}
+    ${tile(ic, '', col || (t.type === 'piggy' ? 'pink' : null))}
     <div class="grow"><span class="row-title">${esc(title)}</span><span class="row-sub">${esc(sub)}</span></div>
     <span class="row-amount ${amountCls}">${amount}</span>
   </li>`;
@@ -63,7 +63,7 @@ function accountsView() {
   return `<div class="card total-line"><span class="muted">Итого на счетах</span><b>${money(totalBalance())}</b></div>
     <ul class="list card">${accs.map((a) => {
       const sub = a.type === 'card'
-        ? [a.bank, a.last4 ? (a.name.includes(a.last4) ? '' : `•${a.last4}`) : 'без номера', a.syncedAt ? 'сверено с банком' : ''].filter(Boolean).join(' · ')
+        ? [a.bank && a.bank !== a.name && !a.name.includes(a.bank) ? a.bank : '', a.last4 ? (a.name.includes(a.last4) ? '' : `•${a.last4}`) : 'без номера', a.syncedAt ? 'сверено с банком' : ''].filter(Boolean).join(' · ')
         : { cash: 'Наличные', savings: 'Вклад' }[a.type] || '';
       return `<li class="row-item" data-action="edit-account" data-id="${a.id}">
         ${tile(ACC_ICON[a.type] || 'creditcard')}
@@ -95,7 +95,7 @@ function piggiesView() {
     const need = piggyMonthlyNeed(p);
     return `<article class="card piggy">
       <div class="piggy-head" data-action="edit-piggy" data-id="${p.id}">
-        ${tile(piggyIcon(p), 'lg')}
+        ${tile(piggyIcon(p), 'lg', 'pink')}
         <div class="grow"><h3>${esc(p.name)}</h3>
           <p class="muted">${money(saved)}${p.target ? ` из ${money(p.target)}` : ''}${p.deadline ? ` · до ${esc(humanDate(p.deadline))}` : ''}</p></div>
         ${p.target ? `<b>${pct(saved, p.target)}%</b>` : ''}
@@ -136,7 +136,7 @@ function statsView() {
     </div>
     <section class="card">
       <h3 class="card-title">Расходы по категориям</h3>
-      ${s.cats.length ? hbars(s.cats.map((c) => ({ label: c.cat.name, value: c.sum })), money) : '<p class="muted">В этом месяце расходов нет</p>'}
+      ${s.cats.length ? hbars(s.cats.map((c) => ({ label: c.cat.name, value: c.sum, color: catColor(c.cat) })), money) : '<p class="muted">В этом месяце расходов нет</p>'}
     </section>
     <section class="card">
       <h3 class="card-title">Траты за 14 дней</h3>

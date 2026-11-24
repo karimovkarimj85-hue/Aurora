@@ -153,14 +153,14 @@ export function confirmSheet(title, text, { ok = 'Удалить', danger = true
 }
 
 /** Прогресс-кольцо (SVG). value 0..1 или null */
-export function ring(value, size = 56, stroke = 6) {
+export function ring(value, size = 56, stroke = 6, color = null) {
   const r = (size - stroke) / 2;
   const c = 2 * Math.PI * r;
   const v = value == null ? 0 : value;
   const label = value == null ? '—' : `${Math.round(v * 100)}%`;
   return `<svg class="ring" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" role="img" aria-label="Прогресс ${label}">
     <circle cx="${size / 2}" cy="${size / 2}" r="${r}" class="ring-track" stroke-width="${stroke}"/>
-    <circle cx="${size / 2}" cy="${size / 2}" r="${r}" class="ring-fill" stroke-width="${stroke}"
+    <circle cx="${size / 2}" cy="${size / 2}" r="${r}" class="ring-fill" stroke-width="${stroke}" ${color ? `style="stroke:var(--c-${color})"` : ''}
       stroke-dasharray="${c}" stroke-dashoffset="${c * (1 - v)}" transform="rotate(-90 ${size / 2} ${size / 2})"/>
     <text x="50%" y="50%" dy=".35em" text-anchor="middle" class="ring-text">${label}</text>
   </svg>`;

@@ -1,9 +1,11 @@
 import { state, saveChat } from '../store.js';
-import { icon } from '../icons.js';
+import { icon, tile } from '../icons.js';
 import { esc } from '../util.js';
 import { toast, confirmSheet, openSheet } from '../ui.js';
 import { parseQuick, runQuick, claudeBrief, CLAUDE_URL } from '../quick.js';
 import { maskCodes } from '../bank.js';
+import { currentModel, isReady, ask as localAsk } from '../localai.js';
+import { localAiSheet, startDownload, progressHtml, download, onDownload } from '../localaiui.js';
 import { runTurn, describeTool, isStamp, undoRegistry, undone } from '../ai.js';
 
 let busy = false;
@@ -86,13 +88,30 @@ function renderHistory() {
 const LOCAL_SUGGESTIONS = ['кофе 350', 'зарплата 85к', 'вес 82,4', 'задача: позвонить клиенту завтра'];
 let localLog = (() => { try { return JSON.parse(localStorage.getItem('aurora-local-chat') || '[]'); } catch { return []; } })();
 function saveLocal() {
-  try { localStorage.setItem('aurora-local-chat', JSON.stringify(localLog.slice(-60).map((m) => ({ role: m.role, text: m.text, undone: m.undone })))); } catch { /* приватный режим */ }
+  try { localStorage.setItem('aurora-local-chat', JSON.stringify(localLog.slice(-60).map((m) => ({ role: m.role, text: m.text, undone: m.undone, local: m.local, cta: m.cta })))); } catch { /* приватный режим */ }
 }
 function renderLocal() {
   return localLog.map((m, i) => (m.role === 'user'
     ? `<div class="msg user"><div class="bubble">${md(m.text)}</div></div>`
-    : `<div class="msg ai"><div class="bubble ${m.undone ? 'undone' : ''}">${md(m.text)}${m.undo ? `<button class="link" data-action="local-undo" data-i="${i}">Отменить</button>` : ''}</div></div>`)).join('');
+    : `<div class="msg ai"><div class="bubble ${m.undone ? 'undone' : ''}">${md(m.text)}${m.undo ? `<button class="link" data-action="local-undo" data-i="${i}">Отменить</button>` : ''}${m.cta && !currentModel() ? '<button class="link" data-action="ai-local">Включить ИИ на телефоне</button>' : ''}</div>${m.local ? '<span class="msg-meta">ИИ на телефоне · может ошибаться</span>' : ''}</div>`)).join('');
 }
+function aiCard() {
+  const model = currentModel();
+  if (model && isReady() && localLog.length) return '';
+  if (model) {
+    return `<div class="card ai-card"><div class="ai-card-head">${tile('sparkles')}<div class="grow"><b>ИИ на телефоне включён</b>
+      <p class="muted small">${download.active ? 'Модель загружается…' : isReady() ? 'Готов отвечать. Спроси что угодно о деньгах, бизнесе и целях.' : 'Загрузится при первом вопросе (≈ 1 ГБ, лучше по Wi-Fi).'}</p></div></div>
+      <div id="ai-progress">${progressHtml()}</div>
+      ${!isReady() && !download.active ? '<button class="btn btn-ghost btn-block" data-action="ai-download">Загрузить сейчас</button>' : ''}</div>`;
+  }
+  return `<div class="card ai-card">
+    <div class="ai-card-head">${tile('sparkles')}<div class="grow"><b>ИИ без ключа — бесплатно</b>
+      <p class="muted small">Открытая модель работает прямо на iPhone: вопросы, советы, разбор трат и бизнеса. Данные не уходят с телефона.</p></div></div>
+    <button class="btn btn-primary btn-block" data-action="ai-local">Включить ИИ на телефоне</button>
+    <p class="muted small mt">Уже сейчас я понимаю записи: «кофе 350», «зарплата 85к», «вес 82,4», «ZK POS продал 2 кассы 12 млн», SMS банка. Для сложных вопросов есть ${icon('sparkles', { size: 13, cls: 'inline' })} «Спросить Claude» (твоя подписка).</p>
+  </div>`;
+}
+
 async function sendLocal(t, rerender) {
   if (!t) { toast('Без ключа ИИ я не умею читать фото и файлы. Нажми «Спросить Claude»'); pending = []; rerender(); return; }
   pending = [];
@@ -100,10 +119,38 @@ async function sendLocal(t, rerender) {
   const parsed = parseQuick(t);
   let reply;
   try { reply = parsed ? await runQuick(parsed) : null; } catch (e) { reply = { text: `Не получилось: ${e.message}` }; }
-  localLog.push(reply ? { role: 'ai', text: reply.text, undo: reply.undo } : {
-    role: 'ai',
-    text: 'Не поняла фразу. Примеры: «такси 600», «доход 50к», «вес 82,4», «задача: …». Для вопросов и советов нажми «Спросить Claude» вверху.',
-  });
+  if (reply) {
+    localLog.push({ role: 'ai', text: reply.text, undo: reply.undo });
+    saveLocal(); rerender(); scrollDown();
+    return;
+  }
+  // Не запись, а вопрос — отвечает ИИ на телефоне, если он включён
+  if (!currentModel()) {
+    localLog.push({ role: 'ai', text: 'Это похоже на вопрос. Чтобы я отвечала на вопросы без ключа, включи бесплатный «ИИ на телефоне» (кнопка выше) или нажми «Спросить Claude». А записи я понимаю и так: «такси 600», «вес 82,4», «задача: …».', cta: true });
+    saveLocal(); rerender(); scrollDown();
+    return;
+  }
+  saveLocal();
+  busy = true; controller = new AbortController();
+  rerender();
+  const live = document.getElementById('chat-live');
+  live.innerHTML = '<div class="msg ai"><div class="bubble typing"><span class="status">думаю…</span><div class="live-text"></div></div></div>';
+  const liveText = live.querySelector('.live-text'); const status = live.querySelector('.status');
+  scrollDown();
+  const history = localLog.slice(-8, -1).filter((m) => !m.cta).map((m) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text }));
+  let answer = '';
+  try {
+    answer = await localAsk({
+      question: t, history, brief: claudeBrief(),
+      signal: controller.signal,
+      onProgress: (pr, txt) => { status.textContent = `${/cache/i.test(txt) ? 'загружаю ИИ' : 'скачиваю ИИ'} · ${Math.round(pr * 100)}%`; },
+      onToken: (txt) => { status.textContent = ''; liveText.innerHTML = md(txt); scrollDown(); },
+    });
+  } catch (e) {
+    answer = `ИИ на телефоне не ответил: ${String(e.message || '').replace(/\.+$/, '')}. Попробуй модель полегче в настройках ИИ или нажми «Спросить Claude».`;
+  }
+  busy = false; controller = null;
+  localLog.push({ role: 'ai', text: answer || 'Не смогла ответить, попробуй переформулировать.', local: true });
   saveLocal(); rerender(); scrollDown();
 }
 
@@ -138,17 +185,14 @@ export function render() {
   return `
   <div class="chat-page">
     <header class="page-head compact">
-      <div><h1>Аврора</h1><p class="eyebrow">${hasKey ? 'ИИ-помощник на Claude' : 'Умный ввод · без ключа ИИ'}</p></div>
+      <div><h1>Аврора</h1><p class="eyebrow">${hasKey ? 'ИИ-помощник на Claude' : currentModel() ? 'ИИ на телефоне · бесплатно' : 'Умный ввод · без ключа'}</p></div>
       <div class="row gap">
         <button class="icon-btn lg" data-action="ask-claude" aria-label="Спросить Claude">${icon('sparkles', { size: 20 })}</button>
         ${(hasKey ? state.chat.length : localLog.length) ? `<button class="icon-btn lg tinted" data-action="new-chat" aria-label="Новый диалог">${icon('compose', { size: 20 })}</button>` : ''}
       </div>
     </header>
     <div class="chat-scroll" id="chat-scroll">
-      ${!hasKey && !localLog.length ? `<div class="card ai-off">
-        <p><b>ИИ пока не подключён, но я уже понимаю простые фразы.</b> Пиши «кофе 350», «зарплата 85к», «вес 82,4», «задача: позвонить Самсе завтра», «ZK POS продал 2 кассы 12 млн» или вставь SMS банка.</p>
-        <p class="muted small">Для советов и анализа нажми ${icon('sparkles', { size: 14, cls: 'inline' })} «Спросить Claude»: Аврора соберёт сводку и откроет твоё приложение Claude, оно входит в подписку. Полноценный ИИ внутри Авроры включается ключом API в настройках.</p>
-      </div>` : ''}
+      ${!hasKey ? aiCard() : ''}
       ${hasKey && !state.chat.length ? `<div class="chat-hello">
         <img class="app-icon" src="icons/icon.svg" alt="">
         <p>Привет! Я Аврора. Пиши мне траты («такси 600»), замеры («вес 81,2»), продажи и клиентов ZK POS и Gain CRM, задачи. Присылай скриншоты экранного времени или чеки и спрашивай совета по деньгам, бизнесу, телу и привычкам.</p>
@@ -298,7 +342,15 @@ export function mount(container, rerender) {
     rerender();
   });
   if (state.chat.length) scrollDown();
+  // Прогресс загрузки ИИ обновляем на месте, без перерисовки чата
+  offDl?.();
+  offDl = onDownload(() => {
+    const box = document.getElementById('ai-progress');
+    if (box) box.innerHTML = progressHtml();
+    if (!download.active) rerender();
+  });
 }
+let offDl = null;
 
 export const actions = {
   suggest: (el, _e, rerender) => send(el.dataset.text, rerender),
@@ -313,6 +365,8 @@ export const actions = {
     rerender();
   },
   'ask-claude': () => askClaudeSheet(),
+  'ai-local': (_el, _e, rerender) => localAiSheet({ onChange: rerender }),
+  'ai-download': (_el, _e, rerender) => { startDownload().then(rerender); rerender(); },
   'local-undo': async (el, _e, rerender) => {
     const m = localLog[Number(el.dataset.i)];
     if (!m?.undo) return;

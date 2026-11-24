@@ -1,6 +1,6 @@
 /* Аврора — навык apple-design + бренд Gain Tech:
-   монохромная палитра (чёрный/белый), цвет только смысловой (доход, расход, ошибка),
-   системный шрифт с размерным трекингом, материалы, мгновенный отклик на нажатие. */
+   спокойная основа (системные фоны iOS) + сплошные системные цвета Apple для иконок, категорий, целей и графиков.
+   Без градиентов и эмодзи. Системный шрифт с размерным трекингом, материалы, мгновенный отклик на нажатие. */
 
 :root {
   --bg: #f2f2f7;               /* systemGroupedBackground */
@@ -577,3 +577,56 @@ html.theme-fade, html.theme-fade * { transition: background-color 300ms ease, co
 .row-note { display: block; font-size: 13px; color: var(--label-2); margin-top: 4px; line-height: 1.3; }
 .link-cards .field + .field { margin-top: 10px; }
 .row-amount.muted, .import-top b.muted { color: var(--label-2); }
+
+/* ---------- Цвета: системная палитра Apple ---------- */
+:root {
+  --c-red: #ff3b30; --c-orange: #ff9500; --c-yellow: #ffcc00; --c-green: #34c759; --c-mint: #00c7be;
+  --c-teal: #30b0c7; --c-cyan: #32ade6; --c-blue: #007aff; --c-indigo: #5856d6; --c-purple: #af52de;
+  --c-pink: #ff2d55; --c-brown: #a2845e; --c-gray: #8e8e93;
+  --accent: var(--c-indigo);
+  --accent-soft: rgba(88, 86, 214, 0.12);
+  --on-accent: #ffffff;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --c-red: #ff453a; --c-orange: #ff9f0a; --c-yellow: #ffd60a; --c-green: #30d158; --c-mint: #63e6e2;
+    --c-teal: #40c8e0; --c-cyan: #64d2ff; --c-blue: #0a84ff; --c-indigo: #5e5ce6; --c-purple: #bf5af2;
+    --c-pink: #ff375f; --c-brown: #ac8e68; --c-gray: #98989d;
+    --accent: var(--c-indigo); --accent-soft: rgba(94, 92, 230, 0.22); --on-accent: #ffffff;
+  }
+}
+:root[data-theme="dark"] {
+  --c-red: #ff453a; --c-orange: #ff9f0a; --c-yellow: #ffd60a; --c-green: #30d158; --c-mint: #63e6e2;
+  --c-teal: #40c8e0; --c-cyan: #64d2ff; --c-blue: #0a84ff; --c-indigo: #5e5ce6; --c-purple: #bf5af2;
+  --c-pink: #ff375f; --c-brown: #ac8e68; --c-gray: #98989d;
+  --accent: var(--c-indigo); --accent-soft: rgba(94, 92, 230, 0.22); --on-accent: #ffffff;
+}
+
+/* Цветные плашки иконок, как в «Настройках» iPhone */
+.row-icon.c { background: var(--tile, var(--c-gray)); color: #fff; }
+.row-icon.c.warn { background: var(--c-red); color: #fff; }
+.tip .row-icon { flex: none; width: 30px; height: 30px; border-radius: 8px; }
+.quick-btn .q-ic { background: var(--tile, var(--accent)); color: #fff; }
+.biz-mono { background: var(--c, var(--label)); color: #fff; }
+.biz-pill.on { box-shadow: 0 0 0 2px var(--c, var(--label)); }
+.goal-kind { color: var(--goal, var(--label-2)); font-weight: 600; }
+.goal-kind .ic { color: var(--goal, currentColor); }
+.chart .col { fill: var(--accent); }
+.done .check-btn { background: var(--accent); border-color: var(--accent); }
+.tab.on { color: var(--accent); background: var(--accent-soft); }
+.hero-num { color: var(--label); }
+.stage-chip.on { background: var(--accent); color: #fff; }
+.chip-radio input:checked + span { background: var(--accent); color: #fff; }
+.mini-btn.accent { background: var(--accent-soft); color: var(--accent); }
+.wordmark { color: var(--label); }
+@media (prefers-contrast: more) { .row-icon.c { box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25); } }
+
+/* ---------- ИИ на телефоне ---------- */
+.ai-card-head { display: flex; gap: 12px; align-items: flex-start; }
+.ai-card-head .row-icon { flex: none; }
+.ai-card-head p { margin-top: 3px; }
+.dl { margin-top: 12px; }
+.msg-meta { font-size: 11px; color: var(--label-2); margin: 3px 6px 0; }
+.local-ai-hero { display: flex; gap: 12px; align-items: flex-start; }
+.local-ai-hero .ic { color: var(--c-indigo); flex: none; margin-top: 2px; }
+.model-opt input { width: 20px; height: 20px; accent-color: var(--accent); flex: none; }

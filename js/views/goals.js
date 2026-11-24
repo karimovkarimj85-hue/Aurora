@@ -2,7 +2,7 @@ import {
   state, active, byId, remove, goalProgress, metricEntries, latestMetric, metricProgress, habitStats,
   piggySaved, METRIC_PRESETS, streak, isDone, toggleTask, save, weekProgress,
 } from '../store.js';
-import { tile, GOAL_ICON, icon } from '../icons.js';
+import { tile, GOAL_ICON, GOAL_COLOR, icon } from '../icons.js';
 import { esc, num, money, humanDate, today, addDays, daysBetween, plural, parseIso } from '../util.js';
 import { ring, bar, openSheet, emptyState, confirmSheet, toast } from '../ui.js';
 import { lineChart, columns } from '../charts.js';
@@ -69,11 +69,11 @@ export function render() {
   ${goals.length ? goals.map((g) => {
     const p = goalProgress(g);
     return `<article class="card goal" data-action="open-goal" data-id="${g.id}">
-      <div class="goal-head">
-        ${ring(p, 64, 7)}
+      <div class="goal-head" style="--goal:var(--c-${GOAL_COLOR[g.kind] || 'blue'})">
+        ${ring(p, 64, 7, GOAL_COLOR[g.kind])}
         <div class="grow">
-          <p class="eyebrow">${KIND_LABEL[g.kind]}${g.deadline ? ' · ' + esc(deadlineText(g)) : ''}</p>
-          <h3>${icon(GOAL_ICON[g.kind] || 'target', { size: 18, cls: 'inline' })} ${esc(g.title)}</h3>
+          <p class="eyebrow goal-kind">${icon(GOAL_ICON[g.kind] || 'target', { size: 13, w: 2.2, cls: 'inline' })} ${KIND_LABEL[g.kind]}${g.deadline ? ' · ' + esc(deadlineText(g)) : ''}</p>
+          <h3>${esc(g.title)}</h3>
           ${g.why ? `<p class="muted small">«${esc(g.why)}»</p>` : ''}
         </div>
       </div>
@@ -87,7 +87,7 @@ export function render() {
 
 function openGoal(g) {
   const p = goalProgress(g);
-  let body = `<div class="goal-detail-head">${ring(p, 84, 8)}<div>
+  let body = `<div class="goal-detail-head">${ring(p, 84, 8, GOAL_COLOR[g.kind])}<div>
       <p class="eyebrow">${KIND_LABEL[g.kind]}</p>
       ${g.deadline ? `<p class="muted">До ${esc(humanDate(g.deadline))} · ${esc(deadlineText(g))}</p>` : ''}
       ${g.why ? `<p class="small">«${esc(g.why)}»</p>` : ''}
