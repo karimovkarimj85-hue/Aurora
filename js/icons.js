@@ -80,7 +80,7 @@ const P = {
 export const CAT_ICON = {
   food: 'cart', cafe: 'cup', transport: 'car', home: 'house', health: 'heart', sport_food: 'bolt', learning: 'book',
   clothes: 'shirt', fun: 'game', subs: 'phoneapp', gifts: 'gift', other: 'box', salary: 'briefcase', side: 'hammer',
-  gift_in: 'gift', other_in: 'plus', biz_sale: 'receipt', biz_sub: 'repeat', biz_impl: 'wrench', biz_service: 'gear',
+  gift_in: 'gift', other_in: 'plus', loan: 'bank', p2p_out: 'repeat', p2p_in: 'repeat', biz_sale: 'receipt', biz_sub: 'repeat', biz_impl: 'wrench', biz_service: 'gear',
   biz_in_other: 'plus', biz_purchase: 'box', biz_salary: 'people', biz_ads: 'megaphone', biz_soft: 'laptop',
   biz_rent: 'building', biz_tax: 'bank', biz_delivery: 'truck', biz_other: 'paperclip',
 };

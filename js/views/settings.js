@@ -3,6 +3,8 @@ import {
 } from '../store.js';
 import { businessForm } from '../bizforms.js';
 import { wordmark } from '../icons.js';
+import { APP_VERSION } from '../version.js';
+import { checkForUpdate } from '../update.js';
 import { icon } from '../icons.js';
 import { esc, CURRENCIES, today, money, humanDate } from '../util.js';
 import { toast, confirmSheet, openSheet } from '../ui.js';
@@ -67,7 +69,12 @@ export function render() {
     <button class="btn btn-ghost-danger btn-block" data-action="reset">Стереть все данные</button>
   </section>
 
-  <div class="brand-foot">${wordmark(140)}<p class="brand-sub">BY GAIN TECH · версия 3.0</p><p class="muted small">Данные хранятся только на этом устройстве</p></div>`;
+  <section class="card">
+    <h3 class="card-title">Обновления</h3>
+    <p class="hint">Аврора обновляется сама: новая версия скачивается при запуске и при возвращении в приложение, а потом тихо применяется, когда ты ничего не вводишь. Удалять и заново ставить её не нужно, данные сохраняются.</p>
+    <button class="btn btn-ghost btn-block" data-action="check-update">Проверить обновления</button>
+  </section>
+  <div class="brand-foot">${wordmark(140)}<p class="brand-sub">BY GAIN TECH · версия ${APP_VERSION}</p><p class="muted small">Данные хранятся только на этом устройстве</p></div>`;
 }
 
 export function mount(container) {
@@ -100,6 +107,7 @@ export function mount(container) {
 }
 
 export const actions = {
+  'check-update': () => checkForUpdate({ manual: true }),
   'add-biz': () => businessForm(),
   'edit-biz': (el) => businessForm(byId('businesses', el.dataset.id)),
   'test-key': async (el) => {

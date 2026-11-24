@@ -1,6 +1,6 @@
 import {
   state, active, byId, accountBalance, piggySaved, piggyMonthlyNeed, monthStats, sortedTransactions,
-  totalBalance, totalSaved, remove, personalAccounts,
+  totalBalance, totalSaved, remove, personalAccounts, isNeutral,
 } from '../store.js';
 import { tile, catIcon, piggyIcon, ACC_ICON, icon } from '../icons.js';
 import { importSheet, autoImportSheet, inboxSheet } from '../bankui.js';
@@ -48,7 +48,7 @@ function txRow(t) {
     const c = byId('categories', t.categoryId);
     ic = catIcon(c); title = c?.name || 'Без категории'; sub = acc?.name || '';
     amount = money(t.type === 'income' ? t.amount : -t.amount, { sign: true });
-    amountCls = t.type === 'income' ? 'pos' : '';
+    amountCls = isNeutral(t.categoryId) ? 'muted' : t.type === 'income' ? 'pos' : '';
   }
   if (t.note) sub = `${t.note}${sub ? ' · ' + sub : ''}`;
   return `<li class="row-item" data-action="edit-tx" data-id="${t.id}">

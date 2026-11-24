@@ -6,22 +6,46 @@ import { today, isoDate } from './util.js';
 // ---------- Разбор текста ----------
 
 const CUR = '(?:₽|р\\.?|руб\\.?|rub|uzs|сум|so[\'’`]?m|sum|₸|kzt|тг|\\$|usd|€|eur)';
-const NUM = '(\\d{1,3}(?:[ \\u00a0]?\\d{3})*(?:[.,]\\d{1,2})?|\\d+(?:[.,]\\d{1,2})?)';
-const INCOME = /(зачисл|поступл|пополн|перевод от|получен|возврат|refund|income|credit(?!\s*card)|kirim|tushum|qabul qilindi|o[’']?tkazma kel|cashback|кешбэк|кэшбэк)/i;
+const NUM = '(\\d{1,3}(?:[ \\u00a0]\\d{3})+(?:[.,]\\d{1,2})?|\\d+(?:[.,]\\d{1,2})?)';
+const INCOME = /(зачисл|поступл|пополн|перевод от|получен|возврат|refund|income|kirim|tushum|qabul qilindi|o[’']?tkazma kel|cashback|кешбэк|кэшбэк|popolnen|zachislen|postuplen|perevod ot|vozvrat|cash to card)/i;
 const EXPENSE = /(покупк|оплат|списан|снят|выдач|перевод\b|перевод на|debit|purchase|payment|pokupka|oplata|xarid|to[’']?lov|chiqim|yechib|yechildi|spisanie|bankomat|atm|комисси)/i;
+// Коды подтверждения и входа: такие SMS не импортируем и нигде не храним
+const OTP = /(kod|code|код|parol|пароль|tasdiqlash|podtver|подтвержд|\botp\b|kodingiz|kirish uchun)/i;
+const ATTEMPT = /(3D\s*-?\s*(code|secure)|3DS\b)/i;
+const P2P = /(p2p|chiqim|cash to card|card to card|perevod|перевод|o[’']?tkazma|\bpayme\b|\bpayne\b|\bclick\b|paynet|apelsin)/i;
+const LOAN = /(credit|kredit|кредит|ipoteka|ипотек|zaym|займ|рассрочк|nasiya)/i;
+/** Скрыть одноразовые коды: «3D Code: 482435» → «3D Code: ••••» */
+export const maskCodes = (t) => String(t).replace(/((?:3D\s*)?(?:code|kod|код|kodingiz)[^\d]{0,12})\d{4,8}/gi, '$1••••');
+export const isOtpMessage = (t) => OTP.test(t) && !ATTEMPT.test(t);
 const BALANCE = /(баланс|остаток|доступно|balance|balans|bal\.?|qoldiq|ostatok|dostupno)\s*[:=]?\s*/i;
 const CARD_WORDS = /^(HUMO|HUMOCARD|UZCARD|VISA|MASTERCARD|MC|MIR|МИР|KARTA|КАРТА|CARD|ECMC|MAESTRO|UNIONPAY|UPI|SMS|INFO|UZS|RUB|USD|EUR|KZT|SUM|ОПЛАТА|ПОКУПКА|СПИСАНИЕ|PAYMENT|POKUPKA|OPLATA|BALANS|БАЛАНС)$/i;
 
+// Служебные слова, которые не могут быть названием магазина
+const STOP = /^(перевод|пополнение|зачисление|покупка|оплата|списание|снятие|popolnenie|oplata|pokupka|perevod|zachislenie|spisanie|payment|amount|cards?|code|карта|карты|карту|остаток|баланс|dostupno|vash|ваш|от|на|в|to|from|tez|3d|uzs|rub|sum)$/i;
+// Понятные названия для типовых операций узбекских платёжных систем
+const FRIENDLY = [
+  [/TEZ\s*P2P\s*CHIQIM/i, 'Перевод через Tez'],
+  [/P2P\s*CHIQIM/i, 'Перевод с карты'],
+  [/CASH\s*TO\s*CARD/i, 'Пополнение наличными'],
+  [/PAYME\s*OPLATA\s*CREDIT/i, 'Payme: оплата кредита'],
+  [/\b(PAYME|PAYNE)\b/i, 'Через Payme'],
+  [/\bCLICK\b/i, 'Через Click'],
+];
 const toNum = (s) => Number(String(s).replace(/[\s ]/g, '').replace(',', '.'));
 
 function findDate(text) {
-  const m = text.match(/(\d{2})[./-](\d{2})[./-](\d{2,4})(?:[ ,T]+(\d{2}):(\d{2}))?/);
+  const m = text.match(/(\d{2,4})[./-](\d{2})[./-](\d{2,4})(?:[ ,T]+(\d{2}):(\d{2}))?/);
   if (!m) return null;
-  let y = Number(m[3]); if (y < 100) y += 2000;
-  const d = new Date(y, Number(m[2]) - 1, Number(m[1]));
-  if (Number.isNaN(d.getTime()) || d.getMonth() !== Number(m[2]) - 1) return null;
-  const iso = isoDate(d);
-  return iso > today() ? null : iso;
+  const mk = (y, mo, d) => {
+    if (y < 100) y += 2000;
+    const dt = new Date(y, mo - 1, d);
+    return Number.isNaN(dt.getTime()) || dt.getMonth() !== mo - 1 || dt.getDate() !== d ? null : isoDate(dt);
+  };
+  const a = Number(m[1]); const b = Number(m[2]); const c = Number(m[3]);
+  // Варианты: ДД.ММ.ГГ (большинство банков) и ГГ-ММ-ДД (HUMO: «26-11-16» = 2026-11-16). Берём ближайшую прошедшую дату.
+  const t = today();
+  const opts = [mk(c, b, a), mk(a, b, c)].filter((x) => x && x <= t).sort().reverse();
+  return opts[0] ? { date: opts[0], time: m[4] ? `${m[4]}:${m[5]}` : null } : null;
 }
 
 /**
@@ -29,8 +53,10 @@ function findDate(text) {
  * @returns {{type:'expense'|'income', amount:number, last4:string|null, merchant:string, balance:number|null, date:string, raw:string}|null}
  */
 export function parseBankMessage(raw, fallbackDate = today()) {
-  const text = String(raw || '').replace(/ /g, ' ').replace(/\s+/g, ' ').trim();
-  if (text.length < 8) return null;
+  const original = String(raw || '').replace(/ /g, ' ').replace(/\s+/g, ' ').trim();
+  if (original.length < 8 || isOtpMessage(original)) return null;
+  const attempt = ATTEMPT.test(original);
+  const text = maskCodes(original);
 
   // Баланс отрезаем, чтобы не спутать с суммой операции
   let balance = null; let body = text;
@@ -41,7 +67,7 @@ export function parseBankMessage(raw, fallbackDate = today()) {
   let amount = null; let am = body.match(new RegExp('([+-−])?\\s?' + NUM + '\\s?' + CUR, 'i'));
   if (!am) am = body.match(new RegExp(CUR + '\\s?' + NUM, 'i'));
   if (am) amount = toNum(am[2] ?? am[1]);
-  if (!am) {
+  if (!am && (EXPENSE.test(body) || INCOME.test(body))) {
     const sm = body.match(/([+-−])\s?(\d[\d\s]*[.,]?\d{0,2})/);
     if (sm) { amount = toNum(sm[2]); am = sm; }
   }
@@ -52,8 +78,12 @@ export function parseBankMessage(raw, fallbackDate = today()) {
   const sign = am && am[1];
   if (sign === '+') type = 'income';
   else if (sign === '-' || sign === '−') type = 'expense';
-  else if (INCOME.test(body) && !/(перевод на|списан)/i.test(body)) type = 'income';
-  else if (EXPENSE.test(body)) type = 'expense';
+  else {
+    // Решает слово операции, которое встречается раньше: «oplata … CREDIT» — это расход
+    const iIn = body.search(INCOME); const iEx = body.search(EXPENSE);
+    if (iIn >= 0 && (iEx < 0 || iIn < iEx) && !/(перевод на|списан)/i.test(body)) type = 'income';
+    else if (iEx >= 0) type = 'expense';
+  }
   if (!type) return null;
 
   // Карта: *1234, •1234, карта 1234, card ...1234
@@ -63,9 +93,9 @@ export function parseBankMessage(raw, fallbackDate = today()) {
   // Продавец: самая «заглавная» фраза без служебных слов
   let merchant = '';
   const after = body.slice((am?.index || 0) + (am?.[0]?.length || 0));
-  const candidates = (after + ' | ' + body).match(/[A-ZА-ЯЁ0-9][A-ZА-ЯЁ0-9&'’.*\-_/]+(?:\s+[A-ZА-ЯЁ0-9&'’.*\-_/]{2,}){0,3}/g) || [];
+  const candidates = (after + ' | ' + body).match(/[A-ZА-ЯЁ0-9][A-Za-zА-Яа-яЁё0-9&'’.*\-_/]+(?:\s+[A-ZА-ЯЁ0-9][A-Za-zА-Яа-яЁё0-9&'’.*\-_/]{1,}){0,3}/g) || [];
   for (const c of candidates) {
-    const words = c.split(/\s+/).map((w) => w.replace(/[.,;:]+$/, '')).filter((w) => w && !CARD_WORDS.test(w) && !/^\*?\d+$/.test(w) && !/^\d/.test(w));
+    const words = c.split(/\s+/).map((w) => w.replace(/[.,;:]+$/, '')).filter((w) => w && !CARD_WORDS.test(w) && !STOP.test(w) && !/\*\d/.test(w) && !/^\*?\d+$/.test(w) && !/^\d/.test(w));
     if (words.length && words.join(' ').length >= 3) { merchant = words.join(' ').replace(/[.,;:]+$/, ''); break; }
   }
   if (!merchant && type === 'income') {
@@ -76,7 +106,15 @@ export function parseBankMessage(raw, fallbackDate = today()) {
     const lm = after.match(/(?:в|at|v|магазин|merchant)\s+([^,;]+?)(?:[,;.]|$)/i);
     if (lm) merchant = lm[1].trim();
   }
-  return { type, amount, last4, merchant: merchant.slice(0, 60), balance, date: findDate(text) || fallbackDate, raw: text };
+  const friendly = FRIENDLY.find(([re]) => re.test(text));
+  if (friendly) merchant = friendly[1];
+  const when = findDate(text);
+  const cardLabel = /HUMO/i.test(text) ? 'HUMO' : /UZCARD/i.test(text) ? 'Uzcard' : (attempt && /\bTEZ\b/i.test(text)) ? 'Tez'
+    : /\bVISA\b/i.test(text) ? 'Visa' : /(MASTERCARD|\bMC\b)/i.test(text) ? 'Mastercard' : /(\bMIR\b|МИР)/i.test(text) ? 'МИР' : '';
+  return {
+    type, amount, last4, merchant: merchant.slice(0, 60), balance, cardLabel, attempt,
+    date: when?.date || fallbackDate, time: when?.time || null, hasDate: !!when, raw: text,
+  };
 }
 
 /** Разделить вставленный текст на отдельные сообщения */
@@ -115,8 +153,10 @@ export function guessCategory(p, { business = false } = {}) {
     for (const [cat, re] of BIZ) if (re.test(h)) return cat;
     return p.type === 'income' ? 'biz_sale' : 'biz_other';
   }
-  if (p.type === 'income') return /(зарплат|salary|oylik|ish haqi|аванс)/i.test(p.raw) ? 'salary' : 'other_in';
   const hay = `${p.merchant} ${p.raw}`;
+  if (p.type === 'income') return /(зарплат|salary|oylik|ish haqi|аванс)/i.test(p.raw) ? 'salary' : P2P.test(hay) ? 'p2p_in' : 'other_in';
+  if (LOAN.test(hay)) return 'loan';
+  if (P2P.test(hay) && !/(yandex|uber|taxi|evos|korzinka)/i.test(hay)) return 'p2p_out';
   for (const [cat, re] of KEYWORDS) if (re.test(hay)) return cat;
   return 'other';
 }
@@ -144,14 +184,35 @@ export function findCard(last4) {
 /** Подготовить черновики операций из текста (ничего не сохраняет) */
 export function previewImport(text, { fallbackDate } = {}) {
   const msgs = Array.isArray(text) ? text : splitMessages(text);
+  const seen = new Set();
   return msgs.map((raw) => {
+    if (isOtpMessage(raw)) return { raw: maskCodes(raw), ok: false, otp: true };
     const p = parseBankMessage(raw, fallbackDate);
-    if (!p) return { raw, ok: false };
-    const hash = hashOf(p.raw);
-    const dup = state.transactions.some((t) => t.importHash === hash);
+    if (!p) return { raw: maskCodes(raw), ok: false };
+    // Без даты в тексте (например, 3D-коды Tez) повторные попытки одной оплаты в один день схлопываются
+    const hash = hashOf(p.hasDate ? p.raw : `${p.raw}|${p.date}`);
+    const dup = seen.has(hash) || state.transactions.some((t) => t.importHash === hash);
+    seen.add(hash);
     const card = findCard(p.last4);
-    return { ...p, ok: true, hash, dup, accountId: card?.id || null, categoryId: guessCategory(p, { business: !!card?.businessId }) };
+    return {
+      ...p, ok: true, hash, dup, skip: p.attempt, accountId: card?.id || null,
+      categoryId: guessCategory(p, { business: !!card?.businessId }),
+    };
   });
+}
+
+/** Карты из сообщений, которых ещё нет в Авроре */
+export function unknownCards(items) {
+  const map = new Map();
+  for (const it of items) if (it.ok && it.last4 && !findCard(it.last4) && !map.has(it.last4)) map.set(it.last4, it.cardLabel || '');
+  return [...map].map(([last4, label]) => ({ last4, label }));
+}
+
+/** Привязать номер карты к существующему счёту (например, «TBC» ← •5220) */
+export async function linkCard(accountId, last4, label = '') {
+  const acc = byId('accounts', accountId);
+  if (!acc) return null;
+  return save('accounts', { ...acc, type: 'card', last4, bank: acc.bank || label });
 }
 
 /**
@@ -165,14 +226,14 @@ export async function commitImport(items, { source = 'sms' } = {}) {
     let acc = it.accountId ? byId('accounts', it.accountId) : findCard(it.last4);
     if (!acc) {
       if (it.last4) {
-        acc = await save('accounts', { name: `Карта •${it.last4}`, type: 'card', last4: it.last4, bank: '', initial: 0 });
+        acc = await save('accounts', { name: `${it.cardLabel || 'Карта'} •${it.last4}`, type: 'card', last4: it.last4, bank: it.cardLabel || '', initial: 0 });
         cardsCreated++;
       } else acc = personalAccounts().find((a) => a.type === 'card') || personalAccounts()[0];
     }
     if (!acc) continue;
     await save('transactions', {
       type: it.type, amount: it.amount, categoryId: it.categoryId || guessCategory(it), accountId: acc.id,
-      businessId: acc.businessId || undefined, date: it.date || today(), note: it.merchant || '',
+      businessId: acc.businessId || undefined, date: it.date || today(), time: it.time || undefined, note: it.merchant || '',
       merchant: it.merchant || '', importHash: it.hash, source,
     });
     added++;
@@ -187,7 +248,11 @@ export async function commitImport(items, { source = 'sms' } = {}) {
 
 /** Сохранить нераспознанные сообщения, чтобы разобрать вручную или с ИИ */
 export async function keepUnparsed(raws) {
-  for (const raw of raws) {
+  for (const raw0 of raws) {
+    if (isOtpMessage(raw0)) continue; // коды подтверждения не храним
+    // Реклама и служебные SMS без суммы — не операции, их не сохраняем
+    if (!new RegExp(CUR, 'i').test(raw0) && !EXPENSE.test(raw0) && !INCOME.test(raw0)) continue;
+    const raw = maskCodes(raw0);
     const hash = hashOf(raw);
     if (state.inbox.some((x) => x.id === hash)) continue;
     await save('inbox', { id: hash, raw, receivedAt: new Date().toISOString() });
@@ -221,7 +286,8 @@ export async function syncNtfy({ silent = true } = {}) {
     } catch { /* пропускаем битую строку */ }
   }
   if (!msgs.length) { await saveSettings({ ntfySyncedAt: new Date().toISOString() }); return { added: 0 }; }
-  const items = msgs.flatMap((m) => previewImport([m.text], { fallbackDate: m.date }));
+  // 3D-коды — это лишь попытка оплаты, а коды входа вообще не операции: автоматически их не записываем
+  const items = msgs.flatMap((m) => previewImport([m.text], { fallbackDate: m.date })).filter((i) => !i.otp && !i.attempt);
   const { added, cardsCreated } = await commitImport(items, { source: 'auto' });
   await keepUnparsed(items.filter((i) => !i.ok).map((i) => i.raw));
   await saveSettings({ ntfyLastId: lastId, ntfySyncedAt: new Date().toISOString() });

@@ -1,12 +1,12 @@
 // Умный ввод без ИИ: «кофе 350», «зарплата 85к», «вес 82,4», «задача: позвонить Самсе», «ZK POS доход 4 млн».
 // Работает офлайн и без ключа API. С ключом ту же работу делает Claude, но гибче.
 import {
-  save, remove, active, personalAccounts, byId, businessAccount, upsertMetric, METRIC_PRESETS,
+  state, save, remove, active, personalAccounts, byId, businessAccount, upsertMetric, METRIC_PRESETS,
   accountBalance, monthStats, totalBalance, totalSaved, bizMonthStats, mrr, duePayments, clientName, goalProgress,
   latestMetric, todayTasks, isDone, piggySaved,
 } from './store.js';
 import { parseAmount, today, addDays, money } from './util.js';
-import { parseBankMessage, guessCategory, previewImport, commitImport } from './bank.js';
+import { parseBankMessage, guessCategory, previewImport, commitImport, isOtpMessage } from './bank.js';
 import { dealPaid } from './deals.js';
 
 const INCOME_WORDS = /(зарплат|зп\b|аванс|доход|получил|пришл[оа]|поступ|продал|продажа|оплатил[аи]? мне|вернули|подарили|кешбэк|кэшбэк|\+)/i;
@@ -36,6 +36,7 @@ export function parseQuick(text) {
   if (!t) return null;
 
   // SMS банка
+  if (isOtpMessage(t)) return { kind: 'otp' };
   if (/(\*|•|карт[аы]|card|humo|uzcard)\s?\d{4}/i.test(t) && parseBankMessage(t)) return { kind: 'sms', text: t };
 
   // Замеры тела
@@ -68,10 +69,19 @@ export function parseQuick(text) {
 /** Выполнить разобранное действие. Возвращает {text, undo} */
 export async function runQuick(p) {
   if (!p) return null;
+  if (p.kind === 'otp') return { text: 'Это код подтверждения, а не операция. Я его не сохраняю. Никому не сообщай такие коды.' };
   if (p.kind === 'sms') {
-    const items = previewImport(p.text);
-    const { added } = await commitImport(items, { source: 'chat' });
-    return { text: added ? `Записала ${added} операц. из SMS банка.` : 'Эта операция уже записана.' };
+    // В чат SMS присылают осознанно: 3D-код Tez тоже записываем как оплату
+    const items = previewImport(p.text).map((i) => ({ ...i, skip: false }));
+    const fresh = items.filter((i) => i.ok && !i.dup);
+    const { added, cardsCreated } = await commitImport(items, { source: 'chat' });
+    if (!added) return { text: items.some((i) => i.dup) ? 'Эта операция уже записана.' : 'Не смогла разобрать это SMS.' };
+    const f = fresh[0];
+    const cat = byId('categories', f.categoryId);
+    return {
+      text: `Записала: ${f.type === 'income' ? 'поступление' : 'списание'} ${money(f.amount)}${f.merchant ? ` · ${f.merchant}` : ''} · ${cat?.name || ''}${f.last4 ? ` · карта •${f.last4}` : ''}${cardsCreated ? ' (новая карта: переименуй её в «Деньги → Счета»)' : ''}.${f.attempt ? ' Это был 3D-код, поэтому записала как оплату. Если она не прошла, нажми «Отменить».' : ''}`,
+      undo: async () => { for (const t of state.transactions.filter((x) => fresh.some((i) => i.hash === x.importHash))) await remove('transactions', t.id); },
+    };
   }
   if (p.kind === 'metric') {
     let g = active('goals').find((x) => x.kind === 'body');

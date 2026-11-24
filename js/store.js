@@ -14,10 +14,13 @@ export const DEFAULT_CATEGORIES = [
   ['fun', '🎮', 'Развлечения', 'expense'],
   ['subs', '📱', 'Связь и подписки', 'expense'],
   ['gifts', '🎁', 'Подарки', 'expense'],
+  ['loan', '', 'Кредиты и ипотека', 'expense'],
+  ['p2p_out', '', 'Переводы', 'expense', 'personal', true],
   ['other', '📦', 'Другое', 'expense'],
   ['salary', '💼', 'Зарплата', 'income'],
   ['side', '🧩', 'Подработка', 'income'],
   ['gift_in', '🎉', 'Подарок', 'income'],
+  ['p2p_in', '', 'Пополнения и переводы', 'income', 'personal', true],
   ['other_in', '➕', 'Прочий доход', 'income'],
   // Бизнес
   ['biz_sale', '🧾', 'Продажи', 'income', 'biz'],
@@ -33,7 +36,10 @@ export const DEFAULT_CATEGORIES = [
   ['biz_tax', '🏛', 'Налоги и сборы', 'expense', 'biz'],
   ['biz_delivery', '🚚', 'Доставка', 'expense', 'biz'],
   ['biz_other', '📎', 'Прочие расходы', 'expense', 'biz'],
-].map(([id, emoji, name, kind, scope], order) => ({ id, emoji, name, kind, order, scope: scope || 'personal' }));
+].map(([id, emoji, name, kind, scope, neutral], order) => ({ id, emoji, name, kind, order, scope: scope || 'personal', neutral: !!neutral }));
+// «Нейтральные» категории — перемещения своих денег (переводы между своими картами, пополнения наличными):
+// показываются в операциях, но не считаются доходом или расходом в аналитике.
+export const isNeutral = (catId) => !!state.categories.find((c) => c.id === catId)?.neutral;
 
 export const DEAL_STAGES = [
   { id: 'lead', name: 'Новый лид', open: true },
@@ -57,7 +63,7 @@ export const METRIC_PRESETS = {
 
 const DEFAULT_SETTINGS = {
   name: '',
-  currency: 'RUB',
+  currency: 'UZS',
   apiKey: '',
   model: 'claude-opus-5-5',
   effort: 'low',
@@ -92,7 +98,9 @@ export async function load() {
   const missing = DEFAULT_CATEGORIES.filter((c) => !have.has(c.id)).map((c) => ({ ...c }));
   for (const c of state.categories) {
     const def = DEFAULT_CATEGORIES.find((d) => d.id === c.id);
-    if (def && (c.scope == null || c.order == null)) { c.scope = def.scope; c.order = def.order; missing.push(c); }
+    if (def && (c.scope !== def.scope || c.order !== def.order || !!c.neutral !== def.neutral)) {
+      c.scope = def.scope; c.order = def.order; c.neutral = def.neutral; missing.push(c);
+    }
   }
   if (missing.length) {
     await db.bulkPut('categories', missing);
@@ -101,7 +109,26 @@ export async function load() {
     state.categories = [...map.values()];
   }
   state.categories.sort((a, b) => (a.order ?? 99) - (b.order ?? 99));
+  await migrate();
   setCurrency(state.settings.currency);
+}
+
+/** Разовые донастройки старых данных */
+async function migrate() {
+  const st = state.settings;
+  if (!st.onboarded || st.migratedV4) return;
+  // Валюта — узбекский сум (по просьбе владельца). Карты 1/2/3 из первой настройки — это Tez, TBC и Ипотека банк.
+  if (st.currency === 'RUB') st.currency = 'UZS';
+  const rename = { 'Карта 1': { name: 'Tez', bank: 'Tez', last4: '4004' }, 'Карта 2': { name: 'TBC', bank: 'TBC Bank' }, 'Карта 3': { name: 'Ипотека банк', bank: 'Ipoteka Bank' } };
+  for (const a of state.accounts) {
+    const r = rename[a.name];
+    if (r && !a.businessId && !a.last4) {
+      Object.assign(a, { ...r, type: 'card', last4: r.last4 || null });
+      await db.put('accounts', a);
+    }
+  }
+  st.migratedV4 = true;
+  await db.setMeta('settings', st);
 }
 
 export async function saveSettings(patch) {
@@ -171,7 +198,7 @@ export function monthStats(key = monthKey(today())) {
   let income = 0; let expense = 0;
   const byCat = {};
   for (const t of state.transactions) {
-    if (t.businessId || monthKey(t.date) !== key) continue;
+    if (t.businessId || monthKey(t.date) !== key || isNeutral(t.categoryId)) continue;
     const a = Number(t.amount) || 0;
     if (t.type === 'income') income += a;
     if (t.type === 'expense') { expense += a; byCat[t.categoryId] = (byCat[t.categoryId] || 0) + a; }
@@ -184,13 +211,13 @@ export function monthStats(key = monthKey(today())) {
 
 export function expenseBetween(from, to) {
   return state.transactions
-    .filter((t) => t.type === 'expense' && !t.businessId && t.date >= from && t.date <= to)
+    .filter((t) => t.type === 'expense' && !t.businessId && !isNeutral(t.categoryId) && t.date >= from && t.date <= to)
     .reduce((s, t) => s + (Number(t.amount) || 0), 0);
 }
 
 export const sortedTransactions = (businessId = null) => state.transactions
   .filter((t) => (businessId ? t.businessId === businessId : !t.businessId))
-  .sort((a, b) => (b.date + (b.createdAt || '')).localeCompare(a.date + (a.createdAt || '')));
+  .sort((a, b) => (b.date + (b.time || '') + (b.createdAt || '')).localeCompare(a.date + (a.time || '') + (a.createdAt || '')));
 
 /** Нужно откладывать в месяц, чтобы успеть к сроку */
 export function piggyMonthlyNeed(p) {

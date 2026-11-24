@@ -1,12 +1,15 @@
-// Service worker: кэширует оболочку приложения, чтобы Аврора открывалась без интернета.
-// При каждом изменении файлов приложения увеличивай VERSION.
-const VERSION = 'aurora-v3';
+// Service worker Авроры: офлайн-режим и самообновление.
+// Сеть в приоритете (с откатом на кэш), поэтому новая версия приходит сама — без переустановки.
+// При каждом изменении файлов приложения меняй VERSION здесь и APP_VERSION в js/version.js.
+const VERSION = 'aurora-v4.0';
 const SHELL = [
   './',
   './index.html',
   './manifest.webmanifest',
   './css/app.css',
   './js/main.js',
+  './js/version.js',
+  './js/update.js',
   './js/db.js',
   './js/store.js',
   './js/util.js',
@@ -39,8 +42,13 @@ const SHELL = [
   './icons/icon-512.png',
 ];
 
+// Новая версия ставится и включается сразу, не дожидаясь закрытия старых вкладок
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)));
+  e.waitUntil(
+    caches.open(VERSION)
+      .then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' }))))
+      .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener('activate', (e) => {
@@ -55,19 +63,37 @@ self.addEventListener('message', (e) => {
   if (e.data === 'skipWaiting') self.skipWaiting();
 });
 
+const NETWORK_TIMEOUT = 3000;
+
 self.addEventListener('fetch', (e) => {
-  const url = new URL(e.request.url);
-  // Запросы к API (ИИ и пр.) никогда не кэшируем.
-  if (e.request.method !== 'GET' || url.origin !== self.location.origin) return;
-  e.respondWith(
-    caches.match(e.request, { ignoreSearch: true }).then((hit) =>
-      hit || fetch(e.request).then((res) => {
-        if (res.ok) {
-          const copy = res.clone();
-          caches.open(VERSION).then((c) => c.put(e.request, copy));
-        }
-        return res;
-      }).catch(() => caches.match('./index.html'))
-    )
-  );
+  const req = e.request;
+  const url = new URL(req.url);
+  // Запросы к внешним сервисам (ИИ, ntfy) не трогаем
+  if (req.method !== 'GET' || url.origin !== self.location.origin) return;
+  e.respondWith(networkFirst(req));
 });
+
+/** Сначала сеть (с проверкой свежести), при её отсутствии или задержке > 3 с — кэш */
+async function networkFirst(req) {
+  const cache = await caches.open(VERSION);
+  const fromNetwork = fetch(req, { cache: 'no-cache' }).then((res) => {
+    if (res.ok && res.type === 'basic') cache.put(req, res.clone());
+    return res;
+  });
+  fromNetwork.catch(() => {}); // офлайн — не ошибка
+  const cached = cache.match(req, { ignoreSearch: true });
+  try {
+    return await Promise.race([
+      fromNetwork,
+      new Promise((resolve, reject) => setTimeout(async () => {
+        const hit = await cached;
+        if (hit) resolve(hit); else reject(new Error('timeout'));
+      }, NETWORK_TIMEOUT)),
+    ]);
+  } catch {
+    const hit = await cached;
+    if (hit) return hit;
+    if (req.mode === 'navigate') return (await cache.match('./index.html')) || Response.error();
+    try { return await fromNetwork; } catch { return Response.error(); }
+  }
+}

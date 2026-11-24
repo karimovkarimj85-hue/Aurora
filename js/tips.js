@@ -56,7 +56,8 @@ export function smartTips() {
 
   // Наличка
   const cash = personalAccounts().filter((a) => a.type === 'cash').reduce((s, a) => s + accountBalance(a.id), 0);
-  if (cash >= 200000 && cash > 0.7 * (cash + personalAccounts().filter((a) => a.type !== 'cash').reduce((s, a) => s + accountBalance(a.id), 0))) {
+  const CASH_MIN = { RUB: 200000, UZS: 20000000, KZT: 1000000, USD: 2000, EUR: 2000 }[state.settings.currency] || 200000;
+  if (cash >= CASH_MIN && cash > 0.7 * (cash + personalAccounts().filter((a) => a.type !== 'cash').reduce((s, a) => s + accountBalance(a.id), 0))) {
     tips.push({ icon: 'lightbulb', text: `Почти все деньги (${money(cash)}) лежат наличными. Часть можно положить на накопительный счёт, чтобы они приносили процент.`, tab: 'money' });
   }
 

@@ -3,6 +3,7 @@ import { icon } from '../icons.js';
 import { esc } from '../util.js';
 import { toast, confirmSheet, openSheet } from '../ui.js';
 import { parseQuick, runQuick, claudeBrief, CLAUDE_URL } from '../quick.js';
+import { maskCodes } from '../bank.js';
 import { runTurn, describeTool, isStamp, undoRegistry, undone } from '../ai.js';
 
 let busy = false;
@@ -95,7 +96,7 @@ function renderLocal() {
 async function sendLocal(t, rerender) {
   if (!t) { toast('Без ключа ИИ я не умею читать фото и файлы. Нажми «Спросить Claude»'); pending = []; rerender(); return; }
   pending = [];
-  localLog.push({ role: 'user', text: t });
+  localLog.push({ role: 'user', text: maskCodes(t) }); // одноразовые коды не храним
   const parsed = parseQuick(t);
   let reply;
   try { reply = parsed ? await runQuick(parsed) : null; } catch (e) { reply = { text: `Не получилось: ${e.message}` }; }
@@ -230,7 +231,7 @@ async function send(text, rerender) {
   if (!t && !pending.length) return;
   if (!state.settings.apiKey) { await sendLocal(t, rerender); return; }
   const blocks = [...pending.map((p) => p.block)];
-  if (t) blocks.push({ type: 'text', text: t });
+  if (t) blocks.push({ type: 'text', text: maskCodes(t) }); // одноразовые коды не отправляем
   else blocks.push({ type: 'text', text: pending.some((p) => p.kind === 'image') ? 'Посмотри вложение и сделай, что нужно.' : 'Проанализируй файл.' });
   const userPreview = pending.slice();
   pending = [];
@@ -242,7 +243,7 @@ async function send(text, rerender) {
   const list = document.getElementById('chat-list');
   list.insertAdjacentHTML('beforeend', `<div class="msg user">${userPreview.filter((p) => p.preview).map((p) => `<img class="msg-img" src="${p.preview}" alt="">`).join('')}
     ${userPreview.filter((p) => p.kind === 'text').map((p) => `<span class="file-chip">${icon('paperclip', { size: 14 })} ${esc(p.name)}</span>`).join('')}
-    ${t ? `<div class="bubble">${md(t)}</div>` : ''}</div>`);
+    ${t ? `<div class="bubble">${md(maskCodes(t))}</div>` : ''}</div>`);
   const live = document.getElementById('chat-live');
   live.innerHTML = '<div class="msg ai"><div class="bubble typing"><span class="status">думаю…</span><div class="live-text"></div></div></div>';
   const liveText = live.querySelector('.live-text');

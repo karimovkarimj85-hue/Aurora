@@ -1,8 +1,8 @@
 // Точка входа: загрузка данных, маршрутизация по вкладкам, обработка нажатий.
 import { load, state, subscribe, seedBusinesses } from './store.js';
 import { icon } from './icons.js';
+import { registerSW, announceUpdate } from './update.js';
 import { runSync } from './bankui.js';
-import { toast } from './ui.js';
 import * as today from './views/today.js';
 import * as money from './views/money.js';
 import * as goals from './views/goals.js';
@@ -103,27 +103,6 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
-async function registerSW() {
-  if (!('serviceWorker' in navigator) || location.protocol === 'file:') return;
-  try {
-    const reg = await navigator.serviceWorker.register('./sw.js');
-    reg.addEventListener('updatefound', () => {
-      const sw = reg.installing;
-      sw?.addEventListener('statechange', () => {
-        if (sw.state === 'installed' && navigator.serviceWorker.controller) {
-          toast('Доступна новая версия Авроры', { action: 'Обновить', ms: 15000, onAction: () => sw.postMessage('skipWaiting') });
-        }
-      });
-    });
-    let reloaded = false;
-    navigator.serviceWorker.addEventListener('controllerchange', () => {
-      if (reloaded) return; reloaded = true; location.reload();
-    });
-  } catch (e) {
-    console.warn('SW не зарегистрирован', e);
-  }
-}
-
 // На iOS :active срабатывает мгновенно только при наличии touchstart-слушателя
 document.addEventListener('touchstart', () => {}, { passive: true });
 
@@ -153,6 +132,7 @@ window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', a
     navigator.storage?.persist?.().catch(() => {});
     render();
     registerSW();
+    announceUpdate();
   } catch (e) {
     console.error(e);
     viewEl.innerHTML = `<div class="empty"><div class="empty-icon">${icon('warning', { size: 30 })}</div><h3>Не удалось загрузить данные</h3><p class="muted">${e.message}</p></div>`;

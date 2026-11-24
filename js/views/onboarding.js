@@ -7,12 +7,12 @@ import { toast } from '../ui.js';
 let step = 0;
 const draft = {
   name: '',
-  currency: 'RUB',
+  currency: 'UZS',
   accounts: [
     { name: 'Наличные', type: 'cash', balance: '400000' },
-    { name: 'Карта 1', type: 'card', balance: '40000' },
-    { name: 'Карта 2', type: 'card', balance: '0' },
-    { name: 'Карта 3', type: 'card', balance: '0' },
+    { name: 'Tez', type: 'card', balance: '40000', bank: 'Tez', last4: '4004' },
+    { name: 'TBC', type: 'card', balance: '0', bank: 'TBC Bank' },
+    { name: 'Ипотека банк', type: 'card', balance: '0', bank: 'Ipoteka Bank' },
   ],
   body: true, mind: true, house: true, cushion: true,
   weight: '', weightT: '', fat: '', fatT: '', waist: '', waistT: '',
@@ -105,7 +105,7 @@ const n = (v) => { const x = parseAmount(v); return Number.isFinite(x) ? x : nul
 async function finish() {
   for (const a of draft.accounts) {
     if (!a.name.trim()) continue;
-    await save('accounts', { name: a.name.trim(), type: a.type, initial: n(a.balance) || 0 });
+    await save('accounts', { name: a.name.trim(), type: a.type, initial: n(a.balance) || 0, bank: a.bank || '', last4: a.last4 || null });
   }
   if (draft.body) {
     const metrics = [
@@ -131,7 +131,7 @@ async function finish() {
     await save('goals', { kind: 'money', title: 'Свой дом', piggyId: p.id, deadline: draft.houseDeadline || null, why: 'Своё пространство и спокойствие' });
   }
   await seedBusinesses();
-  await saveSettings({ name: draft.name.trim(), currency: draft.currency, onboarded: true });
+  await saveSettings({ name: draft.name.trim(), currency: draft.currency, onboarded: true, migratedV4: true });
   toast('Добро пожаловать в Аврору');
 }
 
