@@ -1,4 +1,5 @@
 import { active, byId, isDone, toggleTask, streak, save, weekProgress } from '../store.js';
+import { icon } from '../icons.js';
 import { esc, humanDate, today, isoDate } from '../util.js';
 import { emptyState, toast } from '../ui.js';
 import { taskForm } from '../forms.js';
@@ -55,15 +56,15 @@ export function render() {
       <button class="btn btn-ghost btn-block" data-action="archive-done">🗄 Убрать выполненные в архив</button>` : `<p class="muted center pad">Пока ничего не выполнено</p>`;
   }
   return `
-  <header class="page-head"><h1>Задачи</h1>
-    <button class="icon-btn lg" data-action="add" aria-label="Новая задача">＋</button></header>
+  <header class="page-head"><button class="icon-btn lg" data-action="nav" data-to="today" aria-label="Назад">${icon('back', { size: 20, w: 2.2 })}</button><h1 class="grow">Задачи</h1>
+    <button class="icon-btn lg tinted" data-action="add" aria-label="Новая задача">${icon('plus', { size: 22, w: 2.2 })}</button></header>
   <div class="segmented sticky" role="tablist">
     ${[['today', 'Сегодня'], ['upcoming', 'Впереди'], ['done', 'Выполнено']].map(([v, l]) => `
       <button role="tab" class="${seg === v ? 'on' : ''}" aria-selected="${seg === v}" data-action="seg" data-seg="${v}">${l}</button>`).join('')}
   </div>
   ${!all.length ? emptyState('✅', 'Задач пока нет', 'Разбей цели на маленькие шаги. Ежедневные привычки дают самый большой результат.',
     '<button class="btn btn-primary" data-action="add">Добавить задачу</button>') : body}
-  <button class="fab" data-action="add" aria-label="Новая задача">＋</button>`;
+  <button class="fab" data-action="add" aria-label="Новая задача">${icon('plus', { size: 28, w: 2.2 })}</button>`;
 }
 
 export const actions = {

@@ -1,5 +1,6 @@
 // Нижние шторки (bottom sheets), уведомления-тосты, подтверждения.
 import { esc } from './util.js';
+import { icon } from './icons.js';
 
 const root = () => document.getElementById('sheet-root');
 
@@ -17,7 +18,7 @@ export function openSheet({ title, body, onMount, onSubmit, wide = false }) {
       <div class="sheet-grab" aria-hidden="true"></div>
       <header class="sheet-head">
         <h2>${esc(title)}</h2>
-        <button class="icon-btn" data-close aria-label="Закрыть">✕</button>
+        <button class="icon-btn" data-close aria-label="Закрыть">${icon('close', { size: 16, w: 2.2 })}</button>
       </header>
       <div class="sheet-body">${body}</div>
     </section>`;

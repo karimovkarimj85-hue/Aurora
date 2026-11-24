@@ -1,7 +1,8 @@
 import {
   state, active, totalBalance, totalSaved, monthStats, todayTasks, isDone, toggleTask,
-  goalProgress, streak, byId,
+  goalProgress, streak, byId, bizMonthStats, duePayments, clientName,
 } from '../store.js';
+import { icon } from '../icons.js';
 import { smartTips, dailyTip } from '../tips.js';
 import { money, moneyShort, greeting, esc, today, fullDate } from '../util.js';
 import { ring } from '../ui.js';
@@ -20,7 +21,7 @@ export function render() {
       <p class="eyebrow">${esc(fullDate())}</p>
       <h1>${esc(greeting())}${s.name ? ', ' + esc(s.name) : ''}</h1>
     </div>
-    <button class="icon-btn lg" data-action="nav" data-to="settings" aria-label="Настройки">⚙️</button>
+    <button class="icon-btn lg" data-action="nav" data-to="settings" aria-label="Настройки">${icon('gear', { size: 21 })}</button>
   </header>
 
   <section class="card hero" data-action="nav" data-to="money">
@@ -37,10 +38,10 @@ export function render() {
   </section>
 
   <section class="quick">
-    <button class="quick-btn" data-action="add-expense"><span>➖</span>Расход</button>
-    <button class="quick-btn" data-action="add-income"><span>➕</span>Доход</button>
-    <button class="quick-btn" data-action="add-task"><span>✅</span>Задача</button>
-    <button class="quick-btn" data-action="add-metric"><span>⚖️</span>Замер</button>
+    <button class="quick-btn" data-action="add-expense"><span class="q-ic">${icon('arrowUp', { size: 20, w: 2.2 })}</span>Расход</button>
+    <button class="quick-btn" data-action="add-income"><span class="q-ic">${icon('arrowDown', { size: 20, w: 2.2 })}</span>Доход</button>
+    <button class="quick-btn" data-action="add-task"><span class="q-ic">${icon('check', { size: 20, w: 2.4 })}</span>Задача</button>
+    <button class="quick-btn" data-action="add-metric"><span class="q-ic">${icon('scale', { size: 20, w: 2 })}</span>Замер</button>
   </section>
 
   ${tips.length ? `<section class="section">
@@ -60,6 +61,8 @@ export function render() {
     }).join('')}</ul>` : `<button class="card empty-mini" data-action="add-task">На сегодня задач нет. Добавить?</button>`}
   </section>
 
+  ${bizBlock()}
+
   <section class="section">
     <div class="section-head"><h2 class="section-title">Цели</h2><button class="link" data-action="nav" data-to="goals">Все цели</button></div>
     ${goals.length ? `<div class="hscroll">${goals.map((g) => `
@@ -74,6 +77,27 @@ export function render() {
     <p>${esc(dailyTip())}</p>
   </section>
   `;
+}
+
+function bizBlock() {
+  const list = active('businesses');
+  if (!list.length) return '';
+  const due = duePayments(null, 0);
+  return `<section class="section">
+    <div class="section-head"><h2 class="section-title">Бизнес</h2><button class="link" data-action="nav" data-to="business">Открыть</button></div>
+    <ul class="list card">${list.map((b) => {
+      const m = bizMonthStats(b.id);
+      return `<li class="row-item" data-action="nav" data-to="business">
+        <span class="biz-mono" style="--c:${b.color};width:32px;height:32px;font-size:12px">${esc(b.name.split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase())}</span>
+        <div class="grow"><span class="row-title">${esc(b.name)}</span><span class="row-sub">Выручка ${moneyShort(m.income)} · прибыль ${moneyShort(m.profit)}</span></div>
+        ${icon('chevron', { size: 16, cls: 'muted' })}</li>`;
+    }).join('')}
+    ${due.map((s) => `<li class="row-item" data-action="nav" data-to="business">
+        <span class="row-icon warn">${icon('repeat', { size: 18 })}</span>
+        <div class="grow"><span class="row-title">${esc(clientName(s.clientId) || s.title || 'Платёж')}</span><span class="row-sub neg">${s.nextDate < today() ? 'Просрочен платёж' : 'Платёж сегодня'} · ${esc(byId('businesses', s.businessId)?.name || '')}</span></div>
+        <span class="row-amount">${money(s.amount)}</span></li>`).join('')}
+    </ul>
+  </section>`;
 }
 
 export const actions = {

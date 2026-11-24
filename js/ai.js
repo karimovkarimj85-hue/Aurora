@@ -3,6 +3,8 @@ import Anthropic from '../vendor/anthropic-sdk-1.5.0.mjs';
 import {
   state, save, remove, active, byId, accountBalance, piggySaved, monthStats, goalProgress,
   latestMetric, todayTasks, isDone, streak, toggleTask, METRIC_PRESETS, sortedTransactions, habitStats, upsertMetric,
+  personalAccounts, DEAL_STAGES, PERIODS, bizMonthStats, mrr, duePayments, pipeline, businessAccount, paySubscription,
+  clientName, bizBalance, addMonths,
 } from './store.js';
 import { today, money, monthKey, addDays, CURRENCIES, num } from './util.js';
 
@@ -26,6 +28,7 @@ const SYSTEM = () => {
 • Тело: не просто похудеть, а «подсушиться» — снизить процент жира и вернуть мышцам тонус (рекомпозиция).
 • Мозг: вернуть ясность, фокус и тонус головы через привычки.
 • Деньги: копить на большие цели, в том числе на свой дом.
+• Бизнес: у пользователя свои бизнесы — ZK POS (POS-системы: продажа, внедрение и обслуживание касс) и Gain CRM (CRM-система по подписке). Помогай вести клиентов, сделки, регулярные платежи и прибыль. Деньги бизнеса учитываются отдельно от личных.
 Актуальные цифры, цели, задачи и балансы бери через инструмент get_overview, не выдумывай их.
 
 Валюта пользователя: ${cur.name} (${cur.symbol}). Все суммы — в этой валюте.
@@ -38,14 +41,19 @@ const SYSTEM = () => {
 • Экспорт чата из Telegram (текст или JSON): анализируй переписку по просьбе пользователя — темы, настроение, сколько времени уходит, договорённости и задачи из неё (предложи добавить их).
 • Советы по рекомпозиции давай на основе доказательных принципов: умеренный дефицит калорий, достаточно белка, силовые тренировки, сон, шаги. Ты не врач: при проблемах со здоровьем советуй обратиться к специалисту.
 • Финансовые советы — практичные: бюджет, подушка безопасности, регулярные отчисления в копилки. Не рекомендуй конкретные рискованные инвестиции.
+• Если в сообщении речь о бизнесе (клиент, продажа, касса, внедрение, подписка, лид), записывай в бизнес через add_transaction с полем business или бизнес-инструментами. Название бизнеса бери из get_overview; если бизнес неочевиден — спроси.
+• Для бизнес-советов: следи за воронкой, просроченными оплатами, регулярным доходом (MRR), маржой и тем, какие клиенты приносят больше всего.
 • Используй эмодзи умеренно. Не используй таблицы Markdown — экран телефона узкий; списки допустимы.`;
 };
 
 // ---------- Инструменты ----------
 
 function tools() {
-  const expenseCats = state.categories.filter((c) => c.kind === 'expense').map((c) => c.id);
-  const incomeCats = state.categories.filter((c) => c.kind === 'income').map((c) => c.id);
+  const expenseCats = state.categories.filter((c) => c.kind === 'expense' && c.scope !== 'biz').map((c) => c.id);
+  const incomeCats = state.categories.filter((c) => c.kind === 'income' && c.scope !== 'biz').map((c) => c.id);
+  const bizExp = state.categories.filter((c) => c.kind === 'expense' && c.scope === 'biz').map((c) => c.id);
+  const bizInc = state.categories.filter((c) => c.kind === 'income' && c.scope === 'biz').map((c) => c.id);
+  const bizNames = state.businesses.filter((b) => !b.archived).map((b) => b.name);
   const t = (name, description, properties, required = []) => ({
     name, description, eager_input_streaming: true,
     input_schema: { type: 'object', properties, required, additionalProperties: false },
@@ -56,12 +64,15 @@ function tools() {
       from: { type: 'string', description: 'Начальная дата YYYY-MM-DD' },
       to: { type: 'string', description: 'Конечная дата YYYY-MM-DD' },
       category: { type: 'string', description: 'id категории (необязательно)' },
+      business: { type: 'string', description: 'Название бизнеса — тогда вернутся операции этого бизнеса; без него — личные' },
       limit: { type: 'integer', description: 'Максимум записей, по умолчанию 100' },
     }),
-    t('add_transaction', 'Записать расход или доход.', {
+    t('add_transaction', 'Записать расход или доход (личный или бизнеса).', {
       type: { type: 'string', enum: ['expense', 'income'] },
       amount: { type: 'number', description: 'Сумма, положительное число' },
-      category: { type: 'string', enum: [...expenseCats, ...incomeCats], description: `Категория. Расходы: ${expenseCats.join(', ')}. Доходы: ${incomeCats.join(', ')}.` },
+      business: { type: 'string', description: `Название бизнеса, если операция бизнесовая: ${bizNames.join(', ') || 'нет'}. Для личных не передавай.` },
+      client: { type: 'string', description: 'Клиент бизнеса (имя или компания), если есть' },
+      category: { type: 'string', enum: [...expenseCats, ...incomeCats, ...bizExp, ...bizInc], description: `Категория. Личные расходы: ${expenseCats.join(', ')}. Личные доходы: ${incomeCats.join(', ')}. Бизнес-расходы: ${bizExp.join(', ')}. Бизнес-доходы: ${bizInc.join(', ')}.` },
       account: { type: 'string', description: 'Название счёта, если пользователь его указал (иначе не передавай)' },
       date: { type: 'string', description: 'YYYY-MM-DD, по умолчанию сегодня' },
       note: { type: 'string', description: 'Короткий комментарий, например «кофе»' },
@@ -93,6 +104,41 @@ function tools() {
       deadline: { type: 'string', description: 'YYYY-MM-DD' },
       emoji: { type: 'string' },
     }, ['name']),
+    t('add_client', 'Добавить клиента в бизнес.', {
+      business: { type: 'string', description: `Бизнес: ${bizNames.join(', ')}` },
+      name: { type: 'string' },
+      company: { type: 'string' },
+      phone: { type: 'string' },
+      telegram: { type: 'string' },
+      status: { type: 'string', enum: ['lead', 'active', 'paused', 'lost'] },
+      note: { type: 'string' },
+    }, ['business', 'name']),
+    t('add_deal', 'Создать сделку (продажу) в воронке бизнеса.', {
+      business: { type: 'string', description: `Бизнес: ${bizNames.join(', ')}` },
+      title: { type: 'string', description: 'Что продаём' },
+      amount: { type: 'number' },
+      client: { type: 'string', description: 'Имя клиента или компании; если такого нет — создастся' },
+      stage: { type: 'string', enum: DEAL_STAGES.map((s) => s.id), description: DEAL_STAGES.map((s) => `${s.id} — ${s.name}`).join(', ') },
+      expected_date: { type: 'string', description: 'Ожидаемая дата оплаты YYYY-MM-DD' },
+    }, ['business', 'title']),
+    t('update_deal', 'Изменить этап или сумму сделки. При этапе won можно сразу записать оплату (record_payment=true).', {
+      deal: { type: 'string', description: 'Название сделки или клиента (можно примерно)' },
+      stage: { type: 'string', enum: DEAL_STAGES.map((s) => s.id) },
+      amount: { type: 'number' },
+      record_payment: { type: 'boolean', description: 'Записать доход на сумму сделки (только для won)' },
+    }, ['deal']),
+    t('add_subscription', 'Добавить регулярный платёж клиента: подписка на CRM, абонентское обслуживание касс и т.п.', {
+      business: { type: 'string', description: `Бизнес: ${bizNames.join(', ')}` },
+      client: { type: 'string' },
+      title: { type: 'string', description: 'Тариф или услуга' },
+      amount: { type: 'number' },
+      period: { type: 'string', enum: Object.keys(PERIODS) },
+      next_date: { type: 'string', description: 'Дата следующей оплаты YYYY-MM-DD' },
+    }, ['business', 'client', 'amount']),
+    t('record_subscription_payment', 'Отметить, что клиент оплатил регулярный платёж (запишет доход и сдвинет дату следующей оплаты).', {
+      client: { type: 'string', description: 'Клиент или название тарифа' },
+      amount: { type: 'number', description: 'Если отличается от обычной суммы' },
+    }, ['client']),
     t('log_screen_time', 'Записать экранное время за день (например, со скриншота «Экранного времени»).', {
       date: { type: 'string', description: 'YYYY-MM-DD' },
       total_minutes: { type: 'integer' },
@@ -124,7 +170,18 @@ function overview() {
   return {
     today: t,
     currency: state.settings.currency,
-    accounts: active('accounts').map((a) => ({ name: a.name, type: a.type, balance: accountBalance(a.id) })),
+    accounts: personalAccounts().map((a) => ({ name: a.name, type: a.type, balance: accountBalance(a.id) })),
+    businesses: active('businesses').map((b) => {
+      const ms = bizMonthStats(b.id);
+      return {
+        name: b.name, model: b.kind, about: b.about, balance: bizBalance(b), revenue_goal: b.revenueGoal || null,
+        this_month: { revenue: ms.income, expenses: ms.expense, profit: ms.profit, top_expenses: ms.cats.slice(0, 5).map((c) => ({ category: c.cat.name, sum: c.sum })) },
+        mrr: mrr(b.id),
+        pipeline: pipeline(b.id).filter((p) => p.count).map((p) => ({ stage: p.name, count: p.count, sum: p.sum, deals: p.open ? p.deals.slice(0, 10).map((d) => ({ title: d.title, amount: d.amount, client: clientName(d.clientId), expected: d.expectedDate })) : undefined })),
+        clients_total: active('clients').filter((c) => c.businessId === b.id).length,
+        payments_next_14_days: duePayments(b.id, 14).map((s) => ({ client: clientName(s.clientId), title: s.title, amount: s.amount, date: s.nextDate, overdue: s.nextDate < t })),
+      };
+    }),
     piggies: active('piggies').map((p) => ({ name: p.name, saved: piggySaved(p.id), target: p.target, deadline: p.deadline })),
     this_month: { income: m.income, expense: m.expense, top_categories: m.cats.slice(0, 6).map((c) => ({ category: c.cat.name, sum: c.sum })) },
     previous_month: { income: prev.income, expense: prev.expense },
@@ -140,6 +197,23 @@ function overview() {
   };
 }
 
+function findBiz(name) {
+  const list = active('businesses');
+  if (!list.length) fail('У пользователя нет бизнесов');
+  const b = fuzzy(list, name) || (list.length === 1 ? list[0] : null);
+  if (!b) fail(`Бизнес «${name || ''}» не найден. Есть: ${list.map((x) => x.name).join(', ')}`);
+  return b;
+}
+
+async function findOrCreateClient(biz, query, status = 'lead') {
+  const list = active('clients').filter((c) => c.businessId === biz.id);
+  const q = norm(query);
+  const found = list.find((c) => norm(c.name) === q || norm(c.company) === q)
+    || list.find((c) => (q && (norm(c.name).includes(q) || norm(c.company).includes(q))));
+  if (found) return found;
+  return save('clients', { businessId: biz.id, name: String(query).slice(0, 80), status });
+}
+
 function bodyGoal() {
   return active('goals').find((g) => g.kind === 'body');
 }
@@ -153,7 +227,8 @@ async function execute(name, input) {
     case 'list_transactions': {
       const from = isDate(i.from) ? i.from : addDays(today(), -30);
       const to = isDate(i.to) ? i.to : today();
-      const list = sortedTransactions()
+      const bz = i.business ? findBiz(i.business) : null;
+      const list = sortedTransactions(bz?.id || null)
         .filter((x) => x.date >= from && x.date <= to && (!i.category || x.categoryId === i.category))
         .slice(0, Math.min(Number(i.limit) || 100, 300))
         .map((x) => ({
@@ -167,17 +242,21 @@ async function execute(name, input) {
       if (!['expense', 'income'].includes(i.type)) fail('type должен быть expense или income');
       const amount = Number(i.amount);
       if (!(amount > 0)) fail('Сумма должна быть больше нуля');
-      const cat = byId('categories', i.category) || byId('categories', i.type === 'income' ? 'other_in' : 'other');
-      const accounts = active('accounts');
-      if (!accounts.length) fail('У пользователя нет ни одного счёта — попроси добавить счёт во вкладке «Деньги»');
-      const acc = fuzzy(accounts, i.account) || accounts[0];
+      const biz = i.business ? findBiz(i.business) : null;
+      let cat = byId('categories', i.category);
+      if (biz && (!cat || cat.scope !== 'biz')) cat = byId('categories', i.type === 'income' ? 'biz_in_other' : 'biz_other');
+      if (!biz && (!cat || cat.scope === 'biz')) cat = byId('categories', i.type === 'income' ? 'other_in' : 'other');
+      const accounts = biz ? active('accounts').filter((a) => a.businessId === biz.id) : personalAccounts();
+      if (!accounts.length) fail('Нет подходящего счёта — попроси добавить счёт');
+      const acc = (biz ? null : fuzzy(accounts, i.account)) || (biz ? businessAccount(biz) : null) || accounts[0];
+      const client = biz && i.client ? await findOrCreateClient(biz, i.client) : null;
       const tx = await save('transactions', {
-        type: i.type, amount, categoryId: cat.id, accountId: acc.id,
+        type: i.type, amount, categoryId: cat.id, accountId: acc.id, businessId: biz?.id, clientId: client?.id,
         date: isDate(i.date) ? i.date : today(), note: (i.note || '').slice(0, 120),
       });
       return {
-        text: `Записано. Баланс «${acc.name}»: ${money(accountBalance(acc.id))}`,
-        label: `${i.type === 'income' ? 'Доход' : 'Расход'} ${money(amount)} · ${cat.emoji} ${cat.name}${i.note ? ' · ' + i.note : ''}`,
+        text: `Записано${biz ? ` в бизнес ${biz.name}` : ''}. Баланс «${acc.name}»: ${money(accountBalance(acc.id))}`,
+        label: `${biz ? biz.name + ': ' : ''}${i.type === 'income' ? 'доход' : 'расход'} ${money(amount)} · ${cat.emoji} ${cat.name}${i.note ? ' · ' + i.note : ''}`,
         undo: () => remove('transactions', tx.id),
       };
     }
@@ -247,6 +326,78 @@ async function execute(name, input) {
       });
       return { text: 'Копилка создана', label: `${p.emoji} Копилка «${p.name}»`, undo: () => remove('piggies', p.id) };
     }
+    case 'add_client': {
+      const biz = findBiz(i.business);
+      if (!i.name) fail('Нужно имя клиента');
+      const c = await save('clients', {
+        businessId: biz.id, name: String(i.name).slice(0, 80), company: i.company || '', phone: i.phone || '',
+        telegram: i.telegram || '', status: ['lead', 'active', 'paused', 'lost'].includes(i.status) ? i.status : 'lead', note: i.note || '',
+      });
+      return { text: 'Клиент добавлен', label: `${biz.name}: клиент ${c.name}${c.company ? ' · ' + c.company : ''}`, undo: () => remove('clients', c.id) };
+    }
+    case 'add_deal': {
+      const biz = findBiz(i.business);
+      if (!i.title) fail('Нужно название сделки');
+      const client = i.client ? await findOrCreateClient(biz, i.client) : null;
+      const stage = DEAL_STAGES.some((s) => s.id === i.stage) ? i.stage : 'lead';
+      const d = await save('deals', {
+        businessId: biz.id, title: String(i.title).slice(0, 120), amount: Number(i.amount) || 0, clientId: client?.id || null,
+        stage, expectedDate: isDate(i.expected_date) ? i.expected_date : null, stageChangedAt: new Date().toISOString(),
+      });
+      return { text: 'Сделка создана', label: `${biz.name}: сделка «${d.title}» ${d.amount ? money(d.amount) : ''}`, undo: () => remove('deals', d.id) };
+    }
+    case 'update_deal': {
+      const deals = active('deals');
+      const d = fuzzy(deals, i.deal, 'title') || deals.find((x) => fuzzy([{ name: clientName(x.clientId) }], i.deal));
+      if (!d) fail(`Сделка «${i.deal}» не найдена. Есть: ${deals.map((x) => x.title).join(', ') || 'нет'}`);
+      const prev = { ...d };
+      const patch = { ...d };
+      if (i.stage && DEAL_STAGES.some((s) => s.id === i.stage)) {
+        patch.stage = i.stage; patch.stageChangedAt = new Date().toISOString();
+        patch.closedAt = ['won', 'lost'].includes(i.stage) ? new Date().toISOString() : null;
+      }
+      if (Number(i.amount) > 0) patch.amount = Number(i.amount);
+      await save('deals', patch);
+      let tx = null;
+      if (i.record_payment && patch.stage === 'won' && patch.amount > 0) {
+        const biz = byId('businesses', d.businessId);
+        tx = await save('transactions', {
+          type: 'income', amount: patch.amount, categoryId: 'biz_sale', accountId: businessAccount(biz)?.id,
+          businessId: d.businessId, dealId: d.id, clientId: d.clientId, date: today(), note: d.title,
+        });
+      }
+      const st = DEAL_STAGES.find((s) => s.id === patch.stage);
+      return {
+        text: `Сделка обновлена${tx ? ', оплата записана' : ''}`,
+        label: `Сделка «${d.title}» → ${st?.name || ''}${tx ? ` · +${money(patch.amount)}` : ''}`,
+        undo: async () => { await save('deals', prev); if (tx) await remove('transactions', tx.id); },
+      };
+    }
+    case 'add_subscription': {
+      const biz = findBiz(i.business);
+      const amount = Number(i.amount);
+      if (!(amount > 0)) fail('Нужна сумма');
+      const client = await findOrCreateClient(biz, i.client, 'active');
+      const s = await save('subscriptions', {
+        businessId: biz.id, clientId: client.id, title: i.title || '', amount,
+        period: PERIODS[i.period] ? i.period : 'month', nextDate: isDate(i.next_date) ? i.next_date : addMonths(today(), 1),
+        categoryId: biz.kind === 'saas' ? 'biz_sub' : 'biz_service', active: true,
+      });
+      return { text: 'Регулярный платёж добавлен', label: `${biz.name}: ${client.name} · ${money(amount)} ${PERIODS[s.period].name}`, undo: () => remove('subscriptions', s.id) };
+    }
+    case 'record_subscription_payment': {
+      const subs = active('subscriptions').filter((s) => s.active !== false);
+      const q = norm(i.client);
+      const s = subs.find((x) => norm(clientName(x.clientId)).includes(q) || norm(x.title).includes(q) || (q && q.includes(norm(byId('clients', x.clientId)?.name))));
+      if (!s) fail(`Регулярный платёж для «${i.client}» не найден`);
+      const prevSub = { ...s };
+      const { tx } = await paySubscription(s, { amount: Number(i.amount) > 0 ? Number(i.amount) : s.amount });
+      return {
+        text: `Оплата записана, следующая — ${byId('subscriptions', s.id).nextDate}`,
+        label: `Оплата ${clientName(s.clientId) || s.title}: ${money(tx.amount)}`,
+        undo: async () => { await remove('transactions', tx.id); await save('subscriptions', prevSub); },
+      };
+    }
     case 'log_screen_time': {
       if (!isDate(i.date)) fail('Нужна дата YYYY-MM-DD');
       const total = Math.round(Number(i.total_minutes));
@@ -276,6 +427,11 @@ export function describeTool(name, input = {}) {
     case 'log_metric': return `${METRIC_PRESETS[input.metric]?.label || 'Замер'}: ${num(input.value, true)} ${METRIC_PRESETS[input.metric]?.unit || ''}`;
     case 'piggy_deposit': return `Копилка «${input.piggy}»: ${money(input.amount)}`;
     case 'create_piggy': return `Копилка «${input.name}»`;
+    case 'add_client': return `Клиент ${input.name || ''}`;
+    case 'add_deal': return `Сделка «${input.title || ''}»`;
+    case 'update_deal': return `Сделка «${input.deal || ''}»`;
+    case 'add_subscription': return `Регулярный платёж: ${input.client || ''}`;
+    case 'record_subscription_payment': return `Оплата: ${input.client || ''}`;
     case 'log_screen_time': return `📱 Экранное время ${Math.floor((input.total_minutes || 0) / 60)} ч ${(input.total_minutes || 0) % 60} мин`;
     default: return null; // чтение данных не показываем
   }

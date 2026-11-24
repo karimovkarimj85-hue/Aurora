@@ -1,6 +1,7 @@
 // Формы в шторках: операции, счета, копилки, цели, замеры, задачи, экранное время.
 import {
   state, save, remove, byId, active, accountBalance, piggySaved, METRIC_PRESETS, upsertMetric,
+  personalAccounts,
 } from './store.js';
 import { openSheet, toast, confirmSheet } from './ui.js';
 import { esc, today, parseAmount, money, currency } from './util.js';
@@ -32,20 +33,28 @@ async function confirmDelete(what, collection, id, close) {
 
 // ---------------- Операция ----------------
 
-export function txForm(existing = null, presetType = 'expense') {
-  const t = existing || { type: presetType, date: today(), accountId: active('accounts')[0]?.id };
-  const accounts = active('accounts');
-  if (!accounts.length) {
+export function txForm(existing = null, presetType = 'expense', { businessId = null, preset = {} } = {}) {
+  const bizId = existing ? existing.businessId || null : businessId;
+  const biz = bizId ? byId('businesses', bizId) : null;
+  const own = bizId ? active('accounts').filter((a) => a.businessId === bizId) : personalAccounts();
+  const allAcc = active('accounts');
+  const t = existing || { type: presetType, date: today(), accountId: own[0]?.id, ...preset };
+  if (!own.length) {
     toast('Сначала добавь счёт или кошелёк');
     return accountForm();
   }
-  const catsFor = (kind) => state.categories.filter((c) => c.kind === kind);
+  // Для перевода можно выбрать любой счёт (например, вывести прибыль из бизнеса на личную карту)
+  const accounts = t.type === 'transfer' ? allAcc : own;
+  const scope = bizId ? 'biz' : 'personal';
+  const defaultTo = t.toAccountId || allAcc.find((a) => a.id !== t.accountId && (bizId ? !a.businessId : true))?.id;
+  const accOptions = (list, sel) => list.map((a) => opt(a.id, `${a.name} · ${money(accountBalance(a.id))}`, a.id === sel)).join('');
+  const catsFor = (kind) => state.categories.filter((c) => c.kind === kind && (c.scope || 'personal') === scope);
   const catChips = (kind, sel) => catsFor(kind).map((c) => `
     <label class="chip-radio"><input type="radio" name="categoryId" value="${c.id}" ${c.id === sel ? 'checked' : ''}>
       <span>${c.emoji} ${esc(c.name)}</span></label>`).join('');
 
   openSheet({
-    title: existing ? 'Операция' : 'Новая операция',
+    title: biz ? `${existing ? 'Операция' : 'Операция'} · ${biz.name}` : (existing ? 'Операция' : 'Новая операция'),
     body: `<form class="form" novalidate>
       <div class="segmented" role="radiogroup">
         ${[['expense', 'Расход'], ['income', 'Доход'], ['transfer', 'Перевод']].map(([v, l]) => `
@@ -57,9 +66,9 @@ export function txForm(existing = null, presetType = 'expense') {
         <div class="chips" data-cats>${catChips(t.type === 'income' ? 'income' : 'expense', t.categoryId)}</div>
       </div>
       <label class="field"><span data-acc-label>${t.type === 'transfer' ? 'Откуда' : 'Счёт'}</span>
-        <select name="accountId">${accounts.map((a) => opt(a.id, `${a.name} · ${money(accountBalance(a.id))}`, a.id === t.accountId)).join('')}</select></label>
+        <select name="accountId" data-acc data-all="${t.type === 'transfer'}">${accOptions(accounts, t.accountId)}</select></label>
       <label class="field" data-show="transfer"><span>Куда</span>
-        <select name="toAccountId">${accounts.map((a, i) => opt(a.id, a.name, t.toAccountId ? a.id === t.toAccountId : i === 1)).join('')}</select></label>
+        <select name="toAccountId">${allAcc.map((a) => opt(a.id, a.name, a.id === defaultTo)).join('')}</select></label>
       <div class="row gap">
         <label class="field grow"><span>Дата</span><input type="date" name="date" value="${esc(t.date)}" required></label>
       </div>
@@ -73,6 +82,14 @@ export function txForm(existing = null, presetType = 'expense') {
         const type = form.type.value;
         el.querySelectorAll('[data-show]').forEach((n) => { n.hidden = !n.dataset.show.split(' ').includes(type); });
         el.querySelector('[data-acc-label]').textContent = type === 'transfer' ? 'Откуда' : 'Счёт';
+        const accSel = el.querySelector('[data-acc]');
+        const wantAll = type === 'transfer';
+        if (accSel.dataset.all !== String(wantAll)) {
+          const cur = accSel.value;
+          accSel.innerHTML = accOptions(wantAll ? allAcc : own, cur);
+          if (!accSel.value) accSel.value = own[0]?.id;
+          accSel.dataset.all = String(wantAll);
+        }
         const kind = type === 'income' ? 'income' : 'expense';
         const box = el.querySelector('[data-cats]');
         if (box.dataset.kind !== kind) {
@@ -88,12 +105,13 @@ export function txForm(existing = null, presetType = 'expense') {
     },
     async onSubmit(d) {
       const amount = requireAmount(d.amount);
-      const item = { ...(existing || {}), type: d.type, amount, accountId: d.accountId, date: d.date || today(), note: d.note.trim() };
+      const item = { ...(existing || {}), ...preset, type: d.type, amount, accountId: d.accountId, date: d.date || today(), note: d.note.trim() };
+      if (bizId) item.businessId = bizId;
       if (d.type === 'transfer') {
         if (d.toAccountId === d.accountId) throw new Error('Выбери разные счета');
         item.toAccountId = d.toAccountId; delete item.categoryId;
       } else {
-        item.categoryId = d.categoryId || (d.type === 'income' ? 'other_in' : 'other');
+        item.categoryId = d.categoryId || (bizId ? (d.type === 'income' ? 'biz_in_other' : 'biz_other') : (d.type === 'income' ? 'other_in' : 'other'));
         delete item.toAccountId;
       }
       await save('transactions', item);
@@ -104,8 +122,8 @@ export function txForm(existing = null, presetType = 'expense') {
 
 // ---------------- Счёт ----------------
 
-export function accountForm(existing = null) {
-  const a = existing || { type: 'card' };
+export function accountForm(existing = null, { businessId = null } = {}) {
+  const a = existing || { type: 'card', businessId };
   const balance = existing ? accountBalance(existing.id) : '';
   openSheet({
     title: existing ? 'Счёт' : 'Новый счёт',
@@ -134,6 +152,7 @@ export function accountForm(existing = null) {
     async onSubmit(d) {
       const desired = d.balance === '' ? 0 : requireAmount(d.balance, { allowZero: true });
       const item = { ...(existing || {}), name: d.name.trim(), type: d.type };
+      if (a.businessId) item.businessId = a.businessId;
       if (existing) item.initial = (Number(existing.initial) || 0) + (desired - accountBalance(existing.id));
       else item.initial = desired;
       await save('accounts', item);
@@ -183,7 +202,7 @@ export function piggyForm(existing = null, { onSaved } = {}) {
 }
 
 export function piggyMoveForm(piggy, mode = 'in') {
-  const accounts = active('accounts');
+  const accounts = personalAccounts();
   if (!accounts.length) { toast('Сначала добавь счёт'); return; }
   openSheet({
     title: mode === 'in' ? `Пополнить «${piggy.name}»` : `Забрать из «${piggy.name}»`,

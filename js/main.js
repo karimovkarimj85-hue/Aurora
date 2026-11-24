@@ -1,26 +1,31 @@
 // Точка входа: загрузка данных, маршрутизация по вкладкам, обработка нажатий.
-import { load, state, subscribe } from './store.js';
+import { load, state, subscribe, seedBusinesses } from './store.js';
+import { icon } from './icons.js';
 import { toast } from './ui.js';
 import * as today from './views/today.js';
 import * as money from './views/money.js';
 import * as goals from './views/goals.js';
 import * as tasks from './views/tasks.js';
+import * as business from './views/business.js';
 import * as assistant from './views/assistant.js';
 import * as settings from './views/settings.js';
 import * as onboarding from './views/onboarding.js';
 
 const TABS = [
-  ['today', '☀️', 'Сегодня', today],
-  ['money', '💰', 'Деньги', money],
-  ['goals', '🎯', 'Цели', goals],
-  ['tasks', '✅', 'Задачи', tasks],
-  ['ai', '✨', 'Аврора', assistant],
+  ['today', 'today', 'Сегодня', today],
+  ['money', 'wallet', 'Деньги', money],
+  ['business', 'briefcase', 'Бизнес', business],
+  ['goals', 'target', 'Цели', goals],
+  ['ai', 'sparkles', 'Аврора', assistant],
 ];
 const ROUTES = {
   ...Object.fromEntries(TABS.map(([id, , , mod]) => [id, mod])),
+  tasks,
   settings,
   archive: settings.archive,
 };
+// Экраны без своей вкладки подсвечивают родительскую
+const PARENT = { tasks: 'today', settings: 'today', archive: 'today' };
 
 const viewEl = document.getElementById('view');
 const tabbarEl = document.getElementById('tabbar');
@@ -37,10 +42,10 @@ function renderTabbar(r) {
   tabbarEl.hidden = !visible;
   document.body.classList.toggle('no-tabbar', !visible);
   if (!visible) return;
-  const activeTab = r === 'settings' || r === 'archive' ? 'today' : r;
-  tabbarEl.innerHTML = TABS.map(([id, icon, label]) => `
+  const activeTab = PARENT[r] || r;
+  tabbarEl.innerHTML = `<div class="tabbar-inner">${TABS.map(([id, ic, label]) => `
     <a href="#${id}" class="tab ${id === activeTab ? 'on' : ''}" ${id === activeTab ? 'aria-current="page"' : ''}>
-      <span class="tab-icon" aria-hidden="true">${icon}</span><span>${label}</span></a>`).join('');
+      ${icon(ic, { size: 24, w: id === activeTab ? 2.1 : 1.7, cls: 'tab-icon' })}<span>${label}</span></a>`).join('')}</div>`;
 }
 
 function render({ keepScroll = false } = {}) {
@@ -117,9 +122,21 @@ async function registerSW() {
   }
 }
 
+export function applyTheme() {
+  const t = state.settings.theme || 'system';
+  if (t === 'system') document.documentElement.removeAttribute('data-theme');
+  else document.documentElement.dataset.theme = t;
+  const dark = t === 'dark' || (t === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  document.querySelector('meta[name=theme-color]')?.setAttribute('content', dark ? '#000000' : '#f2f2f7');
+}
+subscribe(applyTheme);
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', applyTheme);
+
 (async function start() {
   try {
     await load();
+    applyTheme();
+    if (state.settings.onboarded) await seedBusinesses();
     // Просим браузер не удалять данные при нехватке места
     navigator.storage?.persist?.().catch(() => {});
     render();

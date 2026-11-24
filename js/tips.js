@@ -1,6 +1,6 @@
 // Подсказки: умные (по твоим данным) + полезные советы по целям.
 import {
-  state, active, monthStats, expenseBetween, piggyMonthlyNeed,
+  state, active, monthStats, expenseBetween, piggyMonthlyNeed, duePayments, staleDeals, clientName, personalAccounts,
   latestMetric, todayTasks, isDone, byId, accountBalance,
 } from './store.js';
 import { today, addDays, monthKey, money, daysBetween, plural } from './util.js';
@@ -54,10 +54,22 @@ export function smartTips() {
   }
 
   // Наличка
-  const cash = active('accounts').filter((a) => a.type === 'cash').reduce((s, a) => s + accountBalance(a.id), 0);
-  if (cash >= 200000 && cash > 0.7 * (cash + active('accounts').filter((a) => a.type !== 'cash').reduce((s, a) => s + accountBalance(a.id), 0))) {
+  const cash = personalAccounts().filter((a) => a.type === 'cash').reduce((s, a) => s + accountBalance(a.id), 0);
+  if (cash >= 200000 && cash > 0.7 * (cash + personalAccounts().filter((a) => a.type !== 'cash').reduce((s, a) => s + accountBalance(a.id), 0))) {
     tips.push({ icon: '💡', text: `Почти все деньги (${money(cash)}) лежат наличными. Часть можно положить на накопительный счёт, чтобы они приносили процент.`, tab: 'money' });
   }
+
+  // Бизнес: просроченные и сегодняшние платежи, зависшие сделки
+  const due = duePayments(null, 0);
+  const latePay = due.filter((s) => s.nextDate < t);
+  if (latePay.length) {
+    const sum = latePay.reduce((a, s) => a + Number(s.amount), 0);
+    tips.push({ icon: '💳', text: `${latePay.length} ${plural(latePay.length, 'клиент просрочил', 'клиента просрочили', 'клиентов просрочили')} оплату на ${money(sum)}. Напомни им.`, tab: 'business' });
+  }
+  const todayDue = due.filter((s) => s.nextDate === t);
+  if (todayDue.length) tips.push({ icon: '📅', text: `Сегодня ждём оплату: ${todayDue.map((s) => clientName(s.clientId) || s.title).slice(0, 3).join(', ')}.`, tab: 'business' });
+  const stale = staleDeals(7);
+  if (stale.length) tips.push({ icon: '🤝', text: `${stale.length} ${plural(stale.length, 'сделка не двигается', 'сделки не двигаются', 'сделок не двигаются')} больше недели. Свяжись с клиентами: «${stale[0].title}».`, tab: 'business' });
 
   // Копилки
   for (const p of active('piggies')) {

@@ -1,4 +1,5 @@
 import { state, saveChat } from '../store.js';
+import { icon } from '../icons.js';
 import { esc } from '../util.js';
 import { toast, confirmSheet } from '../ui.js';
 import { runTurn, describeTool, isStamp, undoRegistry, undone } from '../ai.js';
@@ -9,6 +10,9 @@ let controller = null;
 
 const SUGGESTIONS = [
   'Потратил 350 на кофе',
+  'ZK POS: продал 2 кассы кафе «Самса» за 12 млн',
+  'Кто из клиентов должен заплатить на этой неделе?',
+  'Разбери прибыль моих бизнесов за месяц',
   'Как подсушиться и не потерять мышцы?',
   'Разбери мои траты за месяц',
   'Составь план тренировок на неделю',
@@ -82,7 +86,7 @@ export function render() {
   <div class="chat-page">
     <header class="page-head compact">
       <div><h1>Аврора</h1><p class="eyebrow">ИИ-помощник</p></div>
-      ${state.chat.length ? '<button class="icon-btn lg" data-action="new-chat" aria-label="Новый диалог">🗒</button>' : ''}
+      ${state.chat.length ? `<button class="icon-btn lg tinted" data-action="new-chat" aria-label="Новый диалог">${icon('compose', { size: 20 })}</button>` : ''}
     </header>
     <div class="chat-scroll" id="chat-scroll">
       ${!hasKey ? `<div class="card">
@@ -97,8 +101,8 @@ export function render() {
         <button class="btn btn-primary btn-block" data-action="nav" data-to="settings">Открыть настройки</button>
       </div>` : ''}
       ${!state.chat.length ? `<div class="chat-hello">
-        <div class="aurora-orb" aria-hidden="true"></div>
-        <p>Привет! Я Аврора. Пиши мне траты («такси 600»), замеры («вес 81,2»), задачи, присылай скриншоты экранного времени или чеки. А ещё спрашивай совета по деньгам, телу и привычкам.</p>
+        <img class="app-icon" src="icons/icon.svg" alt="">
+        <p>Привет! Я Аврора. Пиши мне траты («такси 600»), замеры («вес 81,2»), продажи и клиентов ZK POS и Gain CRM, задачи. Присылай скриншоты экранного времени или чеки и спрашивай совета по деньгам, бизнесу, телу и привычкам.</p>
         <div class="chips center">${SUGGESTIONS.map((s) => `<button class="chip" data-action="suggest" data-text="${esc(s)}">${esc(s)}</button>`).join('')}</div>
       </div>` : ''}
       <div id="chat-list">${renderHistory()}</div>
@@ -107,10 +111,10 @@ export function render() {
     <form class="composer" id="composer">
       <div id="attach-list" class="attach-list">${pending.map((p, i) => `<span class="attach">${p.preview ? `<img src="${p.preview}" alt="">` : '📎'} ${esc(p.name)}<button type="button" data-action="unattach" data-i="${i}" aria-label="Убрать">✕</button></span>`).join('')}</div>
       <div class="composer-row">
-        <label class="icon-btn attach-btn" aria-label="Прикрепить фото или файл">📎
+        <label class="icon-btn attach-btn" aria-label="Прикрепить фото или файл">${icon('paperclip', { size: 20 })}
           <input type="file" id="file-input" accept="image/*,.txt,.json,.csv,.html" multiple hidden></label>
         <textarea id="chat-input" rows="1" placeholder="${busy ? 'Аврора думает…' : 'Сообщение Авроре'}" enterkeyhint="send"></textarea>
-        <button class="send-btn" type="submit" id="send-btn" aria-label="${busy ? 'Остановить' : 'Отправить'}">${busy ? '■' : '↑'}</button>
+        <button class="send-btn" type="submit" id="send-btn" aria-label="${busy ? 'Остановить' : 'Отправить'}">${busy ? icon('stop', { size: 18 }) : icon('send', { size: 20, w: 2.4 })}</button>
       </div>
     </form>
   </div>`;

@@ -1,5 +1,5 @@
 // Первый запуск: имя, валюта, счета, цели.
-import { save, saveSettings } from '../store.js';
+import { save, saveSettings, seedBusinesses } from '../store.js';
 import { esc, CURRENCIES, parseAmount, today, setCurrency, currency } from '../util.js';
 import { toast } from '../ui.js';
 
@@ -39,7 +39,7 @@ export function render() {
   setCurrency(draft.currency);
   if (step === 0) {
     return `<div class="onboarding">
-      <div class="aurora-orb big" aria-hidden="true"></div>
+      <img class="app-icon big" src="icons/icon.svg" alt="">
       <h1 class="ob-title">Аврора</h1>
       <p class="muted center">Твои деньги, тело и голова в одном месте. Всё хранится только на этом телефоне.</p>
       <form class="card form">
@@ -128,6 +128,7 @@ async function finish() {
     const p = await save('piggies', { name: 'Свой дом', emoji: '🏠', target: n(draft.houseTarget), deadline: draft.houseDeadline || null, initial: 0 });
     await save('goals', { kind: 'money', title: 'Свой дом', emoji: '🏠', piggyId: p.id, deadline: draft.houseDeadline || null, why: 'Своё пространство и спокойствие' });
   }
+  await seedBusinesses();
   await saveSettings({ name: draft.name.trim(), currency: draft.currency, onboarded: true });
   toast('Добро пожаловать в Аврору ✨');
 }

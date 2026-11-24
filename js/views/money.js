@@ -1,7 +1,8 @@
 import {
   state, active, byId, accountBalance, piggySaved, piggyMonthlyNeed, monthStats, sortedTransactions,
-  totalBalance, totalSaved, remove,
+  totalBalance, totalSaved, remove, personalAccounts,
 } from '../store.js';
+import { icon } from '../icons.js';
 import { money, moneyShort, esc, humanDate, monthKey, today, monthName, addDays, pct } from '../util.js';
 import { bar, emptyState, confirmSheet, toast } from '../ui.js';
 import { hbars, columns } from '../charts.js';
@@ -58,7 +59,7 @@ function txRow(t) {
 }
 
 function accountsView() {
-  const accs = active('accounts');
+  const accs = personalAccounts();
   return `<div class="card total-line"><span class="muted">Итого на счетах</span><b>${money(totalBalance())}</b></div>
     <ul class="list card">${accs.map((a) => `
       <li class="row-item" data-action="edit-account" data-id="${a.id}">
@@ -112,9 +113,9 @@ function statsView() {
   const prev = `${m === 1 ? y - 1 : y}-${String(m === 1 ? 12 : m - 1).padStart(2, '0')}`;
   const next = `${m === 12 ? y + 1 : y}-${String(m === 12 ? 1 : m + 1).padStart(2, '0')}`;
   return `<div class="month-nav">
-      <button class="icon-btn" data-action="month" data-m="${prev}" aria-label="Предыдущий месяц">‹</button>
+      <button class="icon-btn" data-action="month" data-m="${prev}" aria-label="Предыдущий месяц">${icon('back', { size: 18 })}</button>
       <b>${monthName(month)}</b>
-      <button class="icon-btn" data-action="month" data-m="${next}" ${isCurrent ? 'disabled' : ''} aria-label="Следующий месяц">›</button>
+      <button class="icon-btn" data-action="month" data-m="${next}" ${isCurrent ? 'disabled' : ''} aria-label="Следующий месяц">${icon('chevron', { size: 18 })}</button>
     </div>
     <div class="stat-grid">
       <div class="card stat"><span class="muted">Доходы</span><b class="pos">${moneyShort(s.income)}</b></div>
@@ -136,13 +137,13 @@ export function render() {
   const body = { ops: opsView, accounts: accountsView, piggies: piggiesView, stats: statsView }[seg]();
   return `
   <header class="page-head"><h1>Деньги</h1>
-    <button class="icon-btn lg" data-action="add-tx" aria-label="Добавить операцию">＋</button></header>
+    <button class="icon-btn lg tinted" data-action="add-tx" aria-label="Добавить операцию">${icon('plus', { size: 22, w: 2.2 })}</button></header>
   <div class="segmented sticky" role="tablist">
     ${[['ops', 'Операции'], ['accounts', 'Счета'], ['piggies', 'Копилки'], ['stats', 'Анализ']].map(([v, l]) => `
       <button role="tab" class="${seg === v ? 'on' : ''}" aria-selected="${seg === v}" data-action="seg" data-seg="${v}">${l}</button>`).join('')}
   </div>
   <div class="seg-body">${body}</div>
-  <button class="fab" data-action="add-tx" aria-label="Добавить операцию">＋</button>`;
+  <button class="fab" data-action="add-tx" aria-label="Добавить операцию">${icon('plus', { size: 28, w: 2.2 })}</button>`;
 }
 
 export const actions = {

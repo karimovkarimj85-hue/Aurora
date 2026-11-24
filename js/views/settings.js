@@ -1,16 +1,18 @@
 import {
-  state, saveSettings, exportData, importData, resetAll, archived, save, remove, piggySaved,
+  state, saveSettings, exportData, importData, resetAll, archived, save, remove, piggySaved, active, byId,
 } from '../store.js';
+import { businessForm } from '../bizforms.js';
+import { icon } from '../icons.js';
 import { esc, CURRENCIES, today, money, humanDate } from '../util.js';
 import { toast, confirmSheet, openSheet } from '../ui.js';
 import { MODELS, EFFORTS, testKey } from '../ai.js';
 
 export function render() {
   const s = state.settings;
-  const archCount = ['goals', 'tasks', 'piggies', 'accounts'].reduce((n, c) => n + archived(c).length, 0);
+  const archCount = ['goals', 'tasks', 'piggies', 'accounts', 'businesses', 'deals'].reduce((n, c) => n + archived(c).length, 0);
   const standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
   return `
-  <header class="page-head"><button class="icon-btn lg" data-action="nav" data-to="today" aria-label="Назад">‹</button><h1 class="grow">Настройки</h1></header>
+  <header class="page-head"><button class="icon-btn lg" data-action="nav" data-to="today" aria-label="Назад">${icon('back', { size: 20, w: 2.2 })}</button><h1 class="grow">Настройки</h1></header>
 
   ${standalone ? '' : `<section class="card install">
     <h3>📲 Установи Аврору на iPhone</h3>
@@ -26,8 +28,17 @@ export function render() {
     <h3 class="card-title">Профиль</h3>
     <label class="field"><span>Как к тебе обращаться</span><input name="name" value="${esc(s.name)}" placeholder="Имя"></label>
     <label class="field"><span>Валюта</span><select name="currency">${CURRENCIES.map((c) => `<option value="${c.code}" ${c.code === s.currency ? 'selected' : ''}>${c.symbol} — ${c.name}</option>`).join('')}</select></label>
+    <label class="field"><span>Оформление</span><select name="theme">${[['system', 'Как в системе'], ['light', 'Светлое'], ['dark', 'Тёмное']].map(([v, l]) => `<option value="${v}" ${v === (s.theme || 'system') ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
     <button class="btn btn-primary btn-block" type="submit">Сохранить</button>
   </form>
+
+  <section class="card">
+    <h3 class="card-title">Мои бизнесы</h3>
+    <ul class="list">${active('businesses').map((b) => `<li class="row-item" data-action="edit-biz" data-id="${b.id}" style="padding-left:0;padding-right:0">
+      <span class="biz-mono" style="--c:${b.color};width:32px;height:32px;font-size:12px">${esc(b.name.split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase())}</span>
+      <div class="grow"><span class="row-title">${esc(b.name)}</span><span class="row-sub">${esc(b.about || '')}</span></div>${icon('chevron', { size: 16, cls: 'muted' })}</li>`).join('')}</ul>
+    <button class="btn btn-ghost btn-block" data-action="add-biz">＋ Добавить бизнес</button>
+  </section>
 
   <form class="card form" id="ai-form">
     <h3 class="card-title">ИИ (Claude)</h3>
@@ -51,14 +62,14 @@ export function render() {
     <button class="btn btn-ghost-danger btn-block" data-action="reset">Стереть все данные</button>
   </section>
 
-  <p class="muted center small pad">Аврора · версия 1.0 · данные хранятся на устройстве</p>`;
+  <p class="muted center small pad">Аврора · версия 2.0 · данные хранятся на устройстве</p>`;
 }
 
 export function mount(container) {
   container.querySelector('#profile-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const d = Object.fromEntries(new FormData(e.target));
-    await saveSettings({ name: d.name.trim(), currency: d.currency });
+    await saveSettings({ name: d.name.trim(), currency: d.currency, theme: d.theme });
     toast('Сохранено');
   });
   container.querySelector('#ai-form').addEventListener('submit', async (e) => {
@@ -84,6 +95,8 @@ export function mount(container) {
 }
 
 export const actions = {
+  'add-biz': () => businessForm(),
+  'edit-biz': (el) => businessForm(byId('businesses', el.dataset.id)),
   'test-key': async (el) => {
     const form = el.closest('form');
     const key = form.apiKey.value.trim();
@@ -125,6 +138,8 @@ const ARCH_SECTIONS = [
   ['piggies', 'Копилки', (x) => `${x.emoji || '🐷'} ${x.name} · ${money(piggySaved(x.id))}`],
   ['tasks', 'Задачи', (x) => `${x.done ? '✓ ' : ''}${x.title}${x.doneAt ? ' · ' + humanDate(x.doneAt.slice(0, 10)) : ''}`],
   ['accounts', 'Счета', (x) => x.name],
+  ['businesses', 'Бизнесы', (x) => x.name],
+  ['deals', 'Сделки', (x) => `${x.title} · ${money(x.amount)}`],
 ];
 
 export const archive = {
@@ -136,7 +151,7 @@ export const archive = {
         <li class="row-item" data-action="arch-open" data-c="${c}" data-id="${x.id}">
           <div class="grow"><span class="row-title">${esc(label(x))}</span></div><span class="muted">›</span></li>`).join('')}</ul>`;
     }).join('');
-    return `<header class="page-head"><button class="icon-btn lg" data-action="nav" data-to="settings" aria-label="Назад">‹</button><h1 class="grow">Архив</h1></header>
+    return `<header class="page-head"><button class="icon-btn lg" data-action="nav" data-to="settings" aria-label="Назад">${icon('back', { size: 20, w: 2.2 })}</button><h1 class="grow">Архив</h1></header>
       ${sections || '<p class="muted center pad">Архив пуст. Сюда попадают завершённые цели, копилки и задачи.</p>'}`;
   },
   actions: {

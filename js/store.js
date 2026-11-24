@@ -19,7 +19,33 @@ export const DEFAULT_CATEGORIES = [
   ['side', '🧩', 'Подработка', 'income'],
   ['gift_in', '🎉', 'Подарок', 'income'],
   ['other_in', '➕', 'Прочий доход', 'income'],
-].map(([id, emoji, name, kind], order) => ({ id, emoji, name, kind, order }));
+  // Бизнес
+  ['biz_sale', '🧾', 'Продажи', 'income', 'biz'],
+  ['biz_sub', '🔁', 'Подписки', 'income', 'biz'],
+  ['biz_impl', '🛠', 'Внедрение и настройка', 'income', 'biz'],
+  ['biz_service', '🧰', 'Обслуживание', 'income', 'biz'],
+  ['biz_in_other', '➕', 'Прочий доход', 'income', 'biz'],
+  ['biz_purchase', '📦', 'Закупка товара', 'expense', 'biz'],
+  ['biz_salary', '👥', 'Зарплаты и подрядчики', 'expense', 'biz'],
+  ['biz_ads', '📣', 'Реклама и маркетинг', 'expense', 'biz'],
+  ['biz_soft', '💻', 'Сервисы и хостинг', 'expense', 'biz'],
+  ['biz_rent', '🏢', 'Аренда и офис', 'expense', 'biz'],
+  ['biz_tax', '🏛', 'Налоги и сборы', 'expense', 'biz'],
+  ['biz_delivery', '🚚', 'Доставка', 'expense', 'biz'],
+  ['biz_other', '📎', 'Прочие расходы', 'expense', 'biz'],
+].map(([id, emoji, name, kind, scope], order) => ({ id, emoji, name, kind, order, scope: scope || 'personal' }));
+
+export const DEAL_STAGES = [
+  { id: 'lead', name: 'Новый лид', open: true },
+  { id: 'talks', name: 'Переговоры', open: true },
+  { id: 'demo', name: 'Демо / КП', open: true },
+  { id: 'invoice', name: 'Счёт выставлен', open: true },
+  { id: 'won', name: 'Оплачено', open: false },
+  { id: 'lost', name: 'Отказ', open: false },
+];
+export const CLIENT_STATUS = { lead: 'Потенциальный', active: 'Активный', paused: 'Пауза', lost: 'Ушёл' };
+export const PERIODS = { month: { name: 'в месяц', months: 1 }, quarter: { name: 'в квартал', months: 3 }, year: { name: 'в год', months: 12 } };
+export const BIZ_KINDS = { pos: 'Продажа и внедрение', saas: 'Подписка (SaaS)', other: 'Другое' };
 
 export const METRIC_PRESETS = {
   weight: { label: 'Вес', unit: 'кг' },
@@ -35,6 +61,7 @@ const DEFAULT_SETTINGS = {
   apiKey: '',
   model: 'claude-opus-5-5',
   effort: 'low',
+  theme: 'system',
   onboarded: false,
 };
 
@@ -42,6 +69,7 @@ export const state = {
   settings: { ...DEFAULT_SETTINGS },
   accounts: [], transactions: [], categories: [], piggies: [],
   goals: [], metrics: [], tasks: [], screentime: [],
+  businesses: [], clients: [], deals: [], subscriptions: [],
   chat: [],
 };
 
@@ -58,9 +86,18 @@ export async function load() {
   state.settings = { ...DEFAULT_SETTINGS, ...(settings || {}) };
   state.chat = chat || [];
   COLLECTIONS.forEach((c, i) => { state[c] = cols[i] || []; });
-  if (!state.categories.length) {
-    state.categories = DEFAULT_CATEGORIES.map((c) => ({ ...c }));
-    await db.bulkPut('categories', state.categories);
+  // Добавляем недостающие стандартные категории (в т.ч. бизнес-категории для старых данных)
+  const have = new Set(state.categories.map((c) => c.id));
+  const missing = DEFAULT_CATEGORIES.filter((c) => !have.has(c.id)).map((c) => ({ ...c }));
+  for (const c of state.categories) {
+    const def = DEFAULT_CATEGORIES.find((d) => d.id === c.id);
+    if (def && (c.scope == null || c.order == null)) { c.scope = def.scope; c.order = def.order; missing.push(c); }
+  }
+  if (missing.length) {
+    await db.bulkPut('categories', missing);
+    const map = new Map(state.categories.map((c) => [c.id, c]));
+    for (const m of missing) map.set(m.id, m);
+    state.categories = [...map.values()];
   }
   state.categories.sort((a, b) => (a.order ?? 99) - (b.order ?? 99));
   setCurrency(state.settings.currency);
@@ -125,14 +162,15 @@ export function piggySaved(piggyId) {
   return Math.round(s * 100) / 100;
 }
 
-export const totalBalance = () => active('accounts').reduce((s, a) => s + accountBalance(a.id), 0);
+export const personalAccounts = () => active('accounts').filter((a) => !a.businessId);
+export const totalBalance = () => personalAccounts().reduce((s, a) => s + accountBalance(a.id), 0);
 export const totalSaved = () => active('piggies').reduce((s, p) => s + piggySaved(p.id), 0);
 
 export function monthStats(key = monthKey(today())) {
   let income = 0; let expense = 0;
   const byCat = {};
   for (const t of state.transactions) {
-    if (monthKey(t.date) !== key) continue;
+    if (t.businessId || monthKey(t.date) !== key) continue;
     const a = Number(t.amount) || 0;
     if (t.type === 'income') income += a;
     if (t.type === 'expense') { expense += a; byCat[t.categoryId] = (byCat[t.categoryId] || 0) + a; }
@@ -145,11 +183,12 @@ export function monthStats(key = monthKey(today())) {
 
 export function expenseBetween(from, to) {
   return state.transactions
-    .filter((t) => t.type === 'expense' && t.date >= from && t.date <= to)
+    .filter((t) => t.type === 'expense' && !t.businessId && t.date >= from && t.date <= to)
     .reduce((s, t) => s + (Number(t.amount) || 0), 0);
 }
 
-export const sortedTransactions = () => [...state.transactions]
+export const sortedTransactions = (businessId = null) => state.transactions
+  .filter((t) => (businessId ? t.businessId === businessId : !t.businessId))
   .sort((a, b) => (b.date + (b.createdAt || '')).localeCompare(a.date + (a.createdAt || '')));
 
 /** Нужно откладывать в месяц, чтобы успеть к сроку */
@@ -266,6 +305,110 @@ export function goalProgress(goal) {
   }
   if (goal.kind === 'mind') return habitStats(goal.id).rate;
   return goal.manualProgress != null ? goal.manualProgress / 100 : null;
+}
+
+// ---------- Бизнес ----------
+
+export function addMonths(iso, n) {
+  const d = parseIso(iso);
+  const day = d.getDate();
+  const r = new Date(d.getFullYear(), d.getMonth() + n, 1);
+  const last = new Date(r.getFullYear(), r.getMonth() + 1, 0).getDate();
+  r.setDate(Math.min(day, last));
+  return isoDate(r);
+}
+
+export const businessAccount = (biz) => byId('accounts', biz?.accountId) || active('accounts').find((a) => a.businessId === biz?.id);
+export const bizBalance = (biz) => active('accounts').filter((a) => a.businessId === biz.id).reduce((s, a) => s + accountBalance(a.id), 0);
+
+export function bizMonthStats(bizId, key = monthKey(today())) {
+  let income = 0; let expense = 0; const byCat = {};
+  for (const t of state.transactions) {
+    if (t.businessId !== bizId || monthKey(t.date) !== key) continue;
+    const a = Number(t.amount) || 0;
+    if (t.type === 'income') income += a;
+    if (t.type === 'expense') { expense += a; byCat[t.categoryId] = (byCat[t.categoryId] || 0) + a; }
+  }
+  const cats = Object.entries(byCat)
+    .map(([id, sum]) => ({ cat: byId('categories', id) || { id, name: 'Без категории', emoji: '❔' }, sum }))
+    .sort((a, b) => b.sum - a.sum);
+  return { income, expense, profit: income - expense, cats };
+}
+
+/** Выручка и прибыль по месяцам (последние n месяцев) */
+export function bizTrend(bizId, n = 6) {
+  const out = [];
+  const now = today();
+  for (let i = n - 1; i >= 0; i--) {
+    const key = monthKey(addMonths(now.slice(0, 8) + '01', -i));
+    out.push({ key, ...bizMonthStats(bizId, key) });
+  }
+  return out;
+}
+
+export const monthlyAmount = (s) => (Number(s.amount) || 0) / (PERIODS[s.period]?.months || 1);
+export const activeSubs = (bizId) => active('subscriptions').filter((s) => s.businessId === bizId && s.active !== false);
+export const mrr = (bizId) => activeSubs(bizId).reduce((sum, s) => sum + monthlyAmount(s), 0);
+
+export function duePayments(bizId = null, days = 7) {
+  const limit = addDays(today(), days);
+  return active('subscriptions')
+    .filter((s) => s.active !== false && (!bizId || s.businessId === bizId) && s.nextDate && s.nextDate <= limit)
+    .sort((a, b) => a.nextDate.localeCompare(b.nextDate));
+}
+
+export function pipeline(bizId) {
+  const deals = active('deals').filter((d) => d.businessId === bizId);
+  return DEAL_STAGES.map((st) => {
+    const list = deals.filter((d) => d.stage === st.id);
+    return { ...st, count: list.length, sum: list.reduce((s, d) => s + (Number(d.amount) || 0), 0), deals: list };
+  });
+}
+
+/** Сделки без движения больше N дней */
+export function staleDeals(days = 7) {
+  const t = today();
+  return active('deals').filter((d) => {
+    const st = DEAL_STAGES.find((s) => s.id === d.stage);
+    if (!st?.open) return false;
+    const last = (d.stageChangedAt || d.updatedAt || d.createdAt || '').slice(0, 10);
+    return last && daysBetween(last, t) >= days;
+  });
+}
+
+export const clientName = (id) => {
+  const c = byId('clients', id);
+  return c ? (c.company ? `${c.name} · ${c.company}` : c.name) : '';
+};
+
+/** Отметить платёж по подписке: доход в бизнес + следующая дата */
+export async function paySubscription(sub, { amount, accountId, date } = {}) {
+  const biz = byId('businesses', sub.businessId);
+  const acc = byId('accounts', accountId) || businessAccount(biz);
+  const tx = await save('transactions', {
+    type: 'income', amount: Number(amount ?? sub.amount), categoryId: sub.categoryId || 'biz_sub',
+    accountId: acc?.id, businessId: sub.businessId, subscriptionId: sub.id, clientId: sub.clientId,
+    date: date || today(), note: sub.title || clientName(sub.clientId),
+  });
+  const prevNext = sub.nextDate;
+  await save('subscriptions', { ...sub, nextDate: addMonths(sub.nextDate || today(), PERIODS[sub.period]?.months || 1), lastPaid: date || today() });
+  return { tx, prevNext };
+}
+
+/** Стартовые бизнесы: ZK POS и Gain CRM (создаются один раз) */
+export async function seedBusinesses() {
+  if (state.settings.bizSeeded) return;
+  const seeds = [
+    { name: 'ZK POS', kind: 'pos', color: '#FF9F0A', about: 'POS-системы: продажа, внедрение и обслуживание' },
+    { name: 'Gain CRM', kind: 'saas', color: '#0A84FF', about: 'CRM-система по подписке' },
+  ];
+  for (const s of seeds) {
+    if (state.businesses.some((b) => b.name === s.name)) continue;
+    const biz = await save('businesses', s);
+    const acc = await save('accounts', { name: `Счёт ${s.name}`, type: 'card', initial: 0, businessId: biz.id });
+    await save('businesses', { ...biz, accountId: acc.id });
+  }
+  await saveSettings({ bizSeeded: true });
 }
 
 // ---------- Резервная копия ----------

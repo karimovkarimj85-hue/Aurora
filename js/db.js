@@ -1,9 +1,10 @@
 // Тонкая обёртка над IndexedDB. Все данные Авроры хранятся только на устройстве.
 const DB_NAME = 'aurora';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 export const COLLECTIONS = [
   'accounts', 'transactions', 'categories', 'piggies',
   'goals', 'metrics', 'tasks', 'screentime',
+  'businesses', 'clients', 'deals', 'subscriptions',
 ];
 
 let dbPromise;

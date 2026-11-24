@@ -1,6 +1,6 @@
 // Service worker: кэширует оболочку приложения, чтобы Аврора открывалась без интернета.
 // При каждом изменении файлов приложения увеличивай VERSION.
-const VERSION = 'aurora-v1';
+const VERSION = 'aurora-v2';
 const SHELL = [
   './',
   './index.html',
@@ -12,6 +12,8 @@ const SHELL = [
   './js/util.js',
   './js/ui.js',
   './js/forms.js',
+  './js/bizforms.js',
+  './js/icons.js',
   './js/charts.js',
   './js/tips.js',
   './js/ai.js',
@@ -19,6 +21,7 @@ const SHELL = [
   './js/views/money.js',
   './js/views/goals.js',
   './js/views/tasks.js',
+  './js/views/business.js',
   './js/views/assistant.js',
   './js/views/settings.js',
   './js/views/onboarding.js',

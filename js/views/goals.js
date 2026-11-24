@@ -2,6 +2,7 @@ import {
   state, active, byId, remove, goalProgress, metricEntries, latestMetric, metricProgress, habitStats,
   piggySaved, METRIC_PRESETS, streak, isDone, toggleTask, save, weekProgress,
 } from '../store.js';
+import { icon } from '../icons.js';
 import { esc, num, money, humanDate, today, addDays, daysBetween, plural, parseIso } from '../util.js';
 import { ring, bar, openSheet, emptyState, confirmSheet, toast } from '../ui.js';
 import { lineChart, columns } from '../charts.js';
@@ -63,7 +64,8 @@ export function render() {
   const goals = active('goals');
   return `
   <header class="page-head"><h1>Цели</h1>
-    <button class="icon-btn lg" data-action="add-goal" aria-label="Новая цель">＋</button></header>
+    <div class="row gap"><button class="icon-btn lg" data-action="nav" data-to="tasks" aria-label="Задачи и привычки">${icon('checklist', { size: 20 })}</button>
+    <button class="icon-btn lg tinted" data-action="add-goal" aria-label="Новая цель">${icon('plus', { size: 22, w: 2.2 })}</button></div></header>
   ${goals.length ? goals.map((g) => {
     const p = goalProgress(g);
     return `<article class="card goal" data-action="open-goal" data-id="${g.id}">
@@ -106,7 +108,7 @@ function openGoal(g) {
         ${lineChart(entries.map((e) => ({ date: e.date, value: e.value })), { unit: preset.unit, target: m.target })}
         ${entries.length ? `<details><summary class="muted small">История (${entries.length})</summary>
           <ul class="mini-list">${[...entries].reverse().map((e) => `<li><span>${esc(humanDate(e.date))}</span><b>${num(e.value, true)} ${preset.unit}</b>
-            <button class="icon-btn sm" data-del-metric="${e.id}" aria-label="Удалить замер">✕</button></li>`).join('')}</ul></details>` : ''}
+            <button class="icon-btn sm" data-del-metric="${e.id}" aria-label="Удалить замер">${icon('close', { size: 14 })}</button></li>`).join('')}</ul></details>` : ''}
       </section>`;
     }
     const linked = active('tasks').filter((t) => t.goalId === g.id);
