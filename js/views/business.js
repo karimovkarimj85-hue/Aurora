@@ -2,18 +2,20 @@ import {
   state, active, byId, DEAL_STAGES, CLIENT_STATUS, PERIODS, bizMonthStats, bizTrend, mrr, activeSubs,
   duePayments, pipeline, bizBalance, clientName, sortedTransactions,
 } from '../store.js';
+import { tile, catIcon } from '../icons.js';
 import { esc, money, moneyShort, humanDate, today, monthName, pct } from '../util.js';
 import { emptyState, bar, openSheet } from '../ui.js';
 import { columns, hbars } from '../charts.js';
 import { icon } from '../icons.js';
 import { txForm } from '../forms.js';
-import { businessForm, clientForm, dealForm, subscriptionForm, payForm, moveDeal } from '../bizforms.js';
+import { businessForm, clientForm, subscriptionForm, payForm } from '../bizforms.js';
+import { dealForm, dealSheet, moveDeal, productForm, dealPaid, dueSteps, PRODUCT_KINDS } from '../deals.js';
 
 let bizId = null;
 let seg = 'overview';
 let query = '';
 
-const SEGS = [['overview', 'Обзор'], ['deals', 'Сделки'], ['clients', 'Клиенты'], ['subs', 'Платежи'], ['fin', 'Финансы']];
+const SEGS = [['overview', 'Обзор'], ['deals', 'Сделки'], ['clients', 'Клиенты'], ['subs', 'Платежи'], ['price', 'Прайс'], ['fin', 'Финансы']];
 
 function current() {
   const list = active('businesses');
@@ -39,7 +41,15 @@ function overview(b) {
   const pipe = pipeline(b.id).filter((p) => p.open);
   const trend = bizTrend(b.id, 6);
   const openSum = pipe.reduce((s, p) => s + p.sum, 0);
+  const steps = dueSteps(today()).filter((d) => d.businessId === b.id);
   return `
+    ${steps.length ? `<section class="section">
+      <div class="section-head"><h2 class="section-title">Сделать сегодня</h2></div>
+      <ul class="list card">${steps.map((d) => `<li class="row-item" data-action="open-deal" data-id="${d.id}">
+        ${tile('clock', d.nextDate < today() ? 'warn' : '')}
+        <div class="grow"><span class="row-title">${esc(d.nextStep)}</span><span class="row-sub ${d.nextDate < today() ? 'neg' : ''}">${esc(d.title)}${d.clientId ? ' · ' + esc(clientName(d.clientId)) : ''} · ${esc(humanDate(d.nextDate))}</span></div>
+        ${icon('chevron', { size: 16, cls: 'muted' })}</li>`).join('')}</ul>
+    </section>` : ''}
     <section class="section">
       <div class="section-head"><h2 class="section-title">Ближайшие платежи</h2><button class="link" data-action="seg" data-seg="subs">Все</button></div>
       ${due.length ? `<ul class="list card">${due.map(payRow).join('')}</ul>` : `<div class="card muted small">На ближайшую неделю платежей нет. Добавь клиентов с регулярной оплатой, и Аврора будет напоминать о датах.</div>`}
@@ -62,10 +72,13 @@ function dealsView(b) {
   const card = (d) => {
     const i = DEAL_STAGES.findIndex((s) => s.id === d.stage);
     const open = DEAL_STAGES[i]?.open;
-    const late = open && d.expectedDate && d.expectedDate < today();
-    return `<article class="deal card" data-action="edit-deal" data-id="${d.id}">
+    const late = open && d.nextDate && d.nextDate < today();
+    const paid = dealPaid(d);
+    return `<article class="deal card" data-action="open-deal" data-id="${d.id}">
       <div class="deal-top"><span class="deal-title">${esc(d.title)}</span><b>${money(d.amount)}</b></div>
-      <p class="row-sub">${esc(clientName(d.clientId) || 'Без клиента')}${d.expectedDate ? ` · <span class="${late ? 'neg' : ''}">${esc(humanDate(d.expectedDate))}</span>` : ''}</p>
+      <p class="row-sub">${esc(clientName(d.clientId) || 'Без клиента')}${(d.items || []).length ? ` · ${d.items.length} поз.` : ''}${paid > 0 && paid < d.amount ? ` · получено ${moneyShort(paid)}` : ''}</p>
+      ${open && d.nextStep ? `<p class="deal-step ${late ? 'neg' : ''}">${icon('clock', { size: 13, w: 2, cls: 'inline' })} ${esc(d.nextStep)}${d.nextDate ? ` · ${esc(humanDate(d.nextDate))}` : ''}</p>` : ''}
+      ${open && !d.nextStep ? '<p class="deal-step muted">Нет следующего шага</p>' : ''}
       ${open ? `<div class="deal-move">
         <button class="mini-btn" data-action="deal-back" data-id="${d.id}" ${i === 0 ? 'disabled' : ''} aria-label="На этап назад">${icon('back', { size: 16, w: 2.2 })}</button>
         <span class="muted small">${esc(DEAL_STAGES[i].name)}</span>
@@ -76,13 +89,26 @@ function dealsView(b) {
   const open = pipe.filter((p) => p.open);
   const closed = pipe.filter((p) => !p.open);
   if (!pipe.some((p) => p.count)) {
-    return emptyState('🤝', 'Сделок пока нет', 'Веди каждую продажу от первого звонка до оплаты, и станет видно, сколько денег «в пути».',
+    return emptyState('funnel', 'Сделок пока нет', 'Веди каждую продажу от первого звонка до оплаты, и станет видно, сколько денег «в пути».',
       '<button class="btn btn-primary" data-action="add-deal">Добавить сделку</button>');
   }
   return open.map((p) => `<div class="stage-head"><span>${esc(p.name)}</span><span class="muted">${p.count ? `${p.count} · ${moneyShort(p.sum)}` : ''}</span></div>
       ${p.deals.map(card).join('')}`).join('')
     + `<details class="closed"><summary class="stage-head"><span>Закрытые</span><span class="muted">${closed.map((p) => `${p.name}: ${p.count}`).join(' · ')}</span></summary>
       ${closed.flatMap((p) => p.deals).sort((a, c) => (c.closedAt || '').localeCompare(a.closedAt || '')).slice(0, 30).map(card).join('')}</details>`;
+}
+
+function priceView(b) {
+  const list = active('products').filter((p) => p.businessId === b.id).sort((a, c) => a.name.localeCompare(c.name));
+  if (!list.length) {
+    return emptyState('list', 'Прайс-лист пуст', b.kind === 'saas' ? 'Добавь тарифы и услуги: «Тариф Старт», «Внедрение», «Обучение». В сделке они подставятся в одно касание.' : 'Добавь товары и услуги: «POS-моноблок», «Сканер штрихкодов», «Фискальный принтер», «Внедрение», «Обслуживание в месяц».',
+      '<button class="btn btn-primary" data-action="add-product">Добавить позицию</button>');
+  }
+  return `<ul class="list card">${list.map((p) => `<li class="row-item" data-action="edit-product" data-id="${p.id}">
+      ${tile(p.kind === 'service' ? 'wrench' : p.kind === 'license' ? 'repeat' : 'box')}
+      <div class="grow"><span class="row-title">${esc(p.name)}</span><span class="row-sub">${esc(PRODUCT_KINDS[p.kind] || '')}${p.cost ? ` · маржа ${Math.round(((p.price - p.cost) / (p.price || 1)) * 100)}%` : ''}</span></div>
+      <span class="row-amount">${money(p.price)}<span class="muted small">/${esc(p.unit || 'шт')}</span></span></li>`).join('')}</ul>
+    <button class="btn btn-ghost btn-block" data-action="add-product">Добавить позицию</button>`;
 }
 
 function clientsView(b) {
@@ -92,7 +118,7 @@ function clientsView(b) {
     .sort((a, c) => (a.status === 'active' ? 0 : 1) - (c.status === 'active' ? 0 : 1) || a.name.localeCompare(c.name));
   const paid = (cid) => state.transactions.filter((t) => t.clientId === cid && t.type === 'income').reduce((s, t) => s + Number(t.amount), 0);
   if (!all.length) {
-    return emptyState('👥', 'Клиентов пока нет', 'Записывай клиентов с телефоном и заметками. Аврора посчитает, сколько каждый принёс.',
+    return emptyState('people', 'Клиентов пока нет', 'Записывай клиентов с телефоном и заметками. Аврора посчитает, сколько каждый принёс.',
       '<button class="btn btn-primary" data-action="add-client">Добавить клиента</button>');
   }
   return `<input class="search" id="client-search" type="search" placeholder="Поиск по имени, компании, телефону" value="${esc(query)}">
@@ -107,7 +133,7 @@ function clientsView(b) {
 function subsView(b) {
   const subs = active('subscriptions').filter((s) => s.businessId === b.id).sort((a, c) => (a.active === false) - (c.active === false) || (a.nextDate || '').localeCompare(c.nextDate || ''));
   if (!subs.length) {
-    return emptyState('🔁', 'Регулярных платежей нет', b.kind === 'saas' ? 'Добавь подписки клиентов: Аврора посчитает регулярный доход в месяц (MRR) и напомнит о датах оплаты.' : 'Абонентское обслуживание касс, лицензии, аренда оборудования: Аврора напомнит, кто и когда должен заплатить.',
+    return emptyState('repeat', 'Регулярных платежей нет', b.kind === 'saas' ? 'Добавь подписки клиентов: Аврора посчитает регулярный доход в месяц (MRR) и напомнит о датах оплаты.' : 'Абонентское обслуживание касс, лицензии, аренда оборудования: Аврора напомнит, кто и когда должен заплатить.',
       '<button class="btn btn-primary" data-action="add-sub">Добавить платёж</button>');
   }
   const act = subs.filter((s) => s.active !== false);
@@ -129,7 +155,7 @@ function finView(b) {
     <button class="btn btn-ghost btn-block" data-action="biz-draw">Вывести прибыль на личный счёт</button>
     <section class="card mt">
       <h3 class="card-title">Расходы за ${monthName(today().slice(0, 7)).toLowerCase()}</h3>
-      ${m.cats.length ? hbars(m.cats.map((c) => ({ label: c.cat.name, emoji: c.cat.emoji, value: c.sum })), money) : '<p class="muted small">Расходов в этом месяце нет</p>'}
+      ${m.cats.length ? hbars(m.cats.map((c) => ({ label: c.cat.name, value: c.sum })), money) : '<p class="muted small">Расходов в этом месяце нет</p>'}
     </section>
     <h2 class="section-title">Операции</h2>
     ${list.length ? `<ul class="list card">${list.map((t) => {
@@ -138,7 +164,7 @@ function finView(b) {
       const title = isT ? 'Перевод' : (c?.name || 'Операция');
       const sub = [humanDate(t.date), t.note, isT ? `${byId('accounts', t.accountId)?.name || ''} → ${byId('accounts', t.toAccountId)?.name || ''}` : ''].filter(Boolean).join(' · ');
       const amt = isT ? money(t.amount) : money(t.type === 'income' ? t.amount : -t.amount, { sign: true });
-      return `<li class="row-item" data-action="edit-tx" data-id="${t.id}"><span class="row-icon">${isT ? '🔁' : c?.emoji || '📎'}</span>
+      return `<li class="row-item" data-action="edit-tx" data-id="${t.id}">${tile(isT ? 'repeat' : catIcon(c))}
         <div class="grow"><span class="row-title">${esc(title)}</span><span class="row-sub">${esc(sub)}</span></div>
         <span class="row-amount ${t.type === 'income' ? 'pos' : ''}">${amt}</span></li>`;
     }).join('')}</ul>` : '<p class="muted center pad">Операций пока нет</p>'}`;
@@ -149,7 +175,7 @@ export function render() {
   const b = current();
   if (!b) {
     return `<header class="page-head"><h1>Бизнес</h1></header>
-      ${emptyState('💼', 'Бизнесов пока нет', 'Добавь свой бизнес, чтобы вести клиентов, сделки, платежи и прибыль отдельно от личных денег.', '<button class="btn btn-primary" data-action="add-biz">Добавить бизнес</button>')}`;
+      ${emptyState('briefcase', 'Бизнесов пока нет', 'Добавь свой бизнес, чтобы вести клиентов, сделки, платежи и прибыль отдельно от личных денег.', '<button class="btn btn-primary" data-action="add-biz">Добавить бизнес</button>')}`;
   }
   const m = bizMonthStats(b.id);
   const subs = activeSubs(b.id);
@@ -157,7 +183,7 @@ export function render() {
   const overdueSum = due.filter((s) => s.nextDate < today()).reduce((s, x) => s + Number(x.amount), 0);
   const openDeals = pipeline(b.id).filter((p) => p.open);
   const activeClients = active('clients').filter((c) => c.businessId === b.id && c.status === 'active').length;
-  const body = { overview, deals: dealsView, clients: clientsView, subs: subsView, fin: finView }[seg](b);
+  const body = { overview, deals: dealsView, clients: clientsView, subs: subsView, price: priceView, fin: finView }[seg](b);
 
   return `
   <header class="page-head">
@@ -214,7 +240,7 @@ function addMenu() {
   const close = openSheet({
     title: `Добавить · ${b.name}`,
     body: `<div class="menu-list card">
-      ${[['m-income', 'arrowDown', 'Доход'], ['m-expense', 'arrowUp', 'Расход'], ['m-deal', 'funnel', 'Сделка'], ['m-client', 'person', 'Клиент'], ['m-sub', 'repeat', 'Регулярный платёж']]
+      ${[['m-deal', 'funnel', 'Сделка'], ['m-income', 'arrowDown', 'Доход'], ['m-expense', 'arrowUp', 'Расход'], ['m-client', 'person', 'Клиент'], ['m-sub', 'repeat', 'Регулярный платёж'], ['m-product', 'list', 'Позиция прайса']]
         .map(([a, ic, l]) => `<button class="menu-item" data-m="${a}">${icon(ic, { size: 20 })}<span>${l}</span>${icon('chevron', { size: 16, cls: 'muted' })}</button>`).join('')}
     </div>`,
     onMount(el) {
@@ -228,6 +254,7 @@ function addMenu() {
           'm-deal': () => dealForm(null, b.id),
           'm-client': () => clientForm(null, b.id),
           'm-sub': () => subscriptionForm(null, b.id),
+          'm-product': () => productForm(null, b.id),
         })[m](), 240);
       });
     },
@@ -244,6 +271,9 @@ export const actions = {
   'add-client': () => clientForm(null, current().id),
   'add-sub': () => subscriptionForm(null, current().id),
   'edit-deal': (el) => dealForm(byId('deals', el.dataset.id)),
+  'open-deal': (el) => dealSheet(byId('deals', el.dataset.id)),
+  'add-product': () => productForm(null, current().id),
+  'edit-product': (el) => productForm(byId('products', el.dataset.id)),
   'deal-next': (el) => moveDeal(byId('deals', el.dataset.id), 1),
   'deal-back': (el) => moveDeal(byId('deals', el.dataset.id), -1),
   'edit-client': (el) => clientForm(byId('clients', el.dataset.id)),

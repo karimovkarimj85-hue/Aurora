@@ -70,6 +70,7 @@ export const state = {
   accounts: [], transactions: [], categories: [], piggies: [],
   goals: [], metrics: [], tasks: [], screentime: [],
   businesses: [], clients: [], deals: [], subscriptions: [],
+  rules: [], inbox: [], products: [], activities: [],
   chat: [],
 };
 

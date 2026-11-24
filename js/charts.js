@@ -43,7 +43,7 @@ export function hbars(rows, fmt) {
   const max = Math.max(...rows.map((r) => r.value));
   return `<ul class="hbars">${rows.map((r) => `
     <li title="${esc(r.label)}: ${esc(fmt(r.value))}">
-      <div class="hbar-head"><span>${r.emoji ? r.emoji + ' ' : ''}${esc(r.label)}</span><span class="hbar-val">${esc(fmt(r.value))}</span></div>
+      <div class="hbar-head"><span>${esc(r.label)}</span><span class="hbar-val">${esc(fmt(r.value))}</span></div>
       <div class="hbar-track"><span style="width:${Math.max(2, (r.value / max) * 100)}%"></span></div>
     </li>`).join('')}</ul>`;
 }

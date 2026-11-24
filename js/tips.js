@@ -1,4 +1,5 @@
 // Подсказки: умные (по твоим данным) + полезные советы по целям.
+import { dueSteps } from './deals.js';
 import {
   state, active, monthStats, expenseBetween, piggyMonthlyNeed, duePayments, staleDeals, clientName, personalAccounts,
   latestMetric, todayTasks, isDone, byId, accountBalance,
@@ -43,20 +44,20 @@ export function smartTips() {
   const prevStart = monthKey(addDays(t.slice(0, 8) + '01', -1)) + '-01';
   const prevSame = expenseBetween(prevStart, addDays(prevStart, day - 1));
   if (prevSame > 0 && thisMonth.expense > prevSame * 1.15) {
-    tips.push({ icon: '📈', text: `Траты в этом месяце на ${Math.round((thisMonth.expense / prevSame - 1) * 100)}% выше, чем в прошлом на эту же дату.`, tab: 'money' });
+    tips.push({ icon: 'trend', text: `Траты в этом месяце на ${Math.round((thisMonth.expense / prevSame - 1) * 100)}% выше, чем в прошлом на эту же дату.`, tab: 'money' });
   }
   if (thisMonth.cats[0] && thisMonth.expense > 0 && thisMonth.cats[0].sum / thisMonth.expense > 0.4 && thisMonth.cats.length > 1) {
-    tips.push({ icon: '🔎', text: `Больше всего денег уходит на «${thisMonth.cats[0].cat.name}»: ${Math.round(thisMonth.cats[0].sum / thisMonth.expense * 100)}% трат месяца.`, tab: 'money' });
+    tips.push({ icon: 'search', text: `Больше всего денег уходит на «${thisMonth.cats[0].cat.name}»: ${Math.round(thisMonth.cats[0].sum / thisMonth.expense * 100)}% трат месяца.`, tab: 'money' });
   }
   const noTxDays = state.transactions.length ? daysBetween(state.transactions.map((x) => x.date).sort().pop(), t) : null;
   if (noTxDays != null && noTxDays >= 3) {
-    tips.push({ icon: '✍️', text: `Ты не записывал траты уже ${noTxDays} ${plural(noTxDays, 'день', 'дня', 'дней')}. Быстро добавь их через «+» или напиши Авроре.`, tab: 'money' });
+    tips.push({ icon: 'pencil', text: `Ты не записывал траты уже ${noTxDays} ${plural(noTxDays, 'день', 'дня', 'дней')}. Быстро добавь их через «+» или напиши Авроре.`, tab: 'money' });
   }
 
   // Наличка
   const cash = personalAccounts().filter((a) => a.type === 'cash').reduce((s, a) => s + accountBalance(a.id), 0);
   if (cash >= 200000 && cash > 0.7 * (cash + personalAccounts().filter((a) => a.type !== 'cash').reduce((s, a) => s + accountBalance(a.id), 0))) {
-    tips.push({ icon: '💡', text: `Почти все деньги (${money(cash)}) лежат наличными. Часть можно положить на накопительный счёт, чтобы они приносили процент.`, tab: 'money' });
+    tips.push({ icon: 'lightbulb', text: `Почти все деньги (${money(cash)}) лежат наличными. Часть можно положить на накопительный счёт, чтобы они приносили процент.`, tab: 'money' });
   }
 
   // Бизнес: просроченные и сегодняшние платежи, зависшие сделки
@@ -64,37 +65,39 @@ export function smartTips() {
   const latePay = due.filter((s) => s.nextDate < t);
   if (latePay.length) {
     const sum = latePay.reduce((a, s) => a + Number(s.amount), 0);
-    tips.push({ icon: '💳', text: `${latePay.length} ${plural(latePay.length, 'клиент просрочил', 'клиента просрочили', 'клиентов просрочили')} оплату на ${money(sum)}. Напомни им.`, tab: 'business' });
+    tips.push({ icon: 'creditcard', text: `${latePay.length} ${plural(latePay.length, 'клиент просрочил', 'клиента просрочили', 'клиентов просрочили')} оплату на ${money(sum)}. Напомни им.`, tab: 'business' });
   }
   const todayDue = due.filter((s) => s.nextDate === t);
-  if (todayDue.length) tips.push({ icon: '📅', text: `Сегодня ждём оплату: ${todayDue.map((s) => clientName(s.clientId) || s.title).slice(0, 3).join(', ')}.`, tab: 'business' });
+  if (todayDue.length) tips.push({ icon: 'calendar', text: `Сегодня ждём оплату: ${todayDue.map((s) => clientName(s.clientId) || s.title).slice(0, 3).join(', ')}.`, tab: 'business' });
+  const steps = dueSteps();
+  if (steps.length) tips.push({ icon: 'clock', text: `Сегодня по сделкам: ${steps.slice(0, 2).map((d) => d.nextStep).join('; ')}${steps.length > 2 ? ` и ещё ${steps.length - 2}` : ''}.`, tab: 'business' });
   const stale = staleDeals(7);
-  if (stale.length) tips.push({ icon: '🤝', text: `${stale.length} ${plural(stale.length, 'сделка не двигается', 'сделки не двигаются', 'сделок не двигаются')} больше недели. Свяжись с клиентами: «${stale[0].title}».`, tab: 'business' });
+  if (stale.length) tips.push({ icon: 'funnel', text: `${stale.length} ${plural(stale.length, 'сделка не двигается', 'сделки не двигаются', 'сделок не двигаются')} больше недели. Свяжись с клиентами: «${stale[0].title}».`, tab: 'business' });
 
   // Копилки
   for (const p of active('piggies')) {
     const need = piggyMonthlyNeed(p);
-    if (need && need > 0) tips.push({ icon: p.emoji || '🐷', text: `«${p.name}»: чтобы успеть к сроку, откладывай около ${money(need)} в месяц.`, tab: 'money' });
+    if (need && need > 0) tips.push({ icon: 'piggy', text: `«${p.name}»: чтобы успеть к сроку, откладывай около ${money(need)} в месяц.`, tab: 'money' });
   }
 
   // Тело: давно не взвешивался
   for (const g of active('goals').filter((x) => x.kind === 'body')) {
     const w = latestMetric(g.id, 'weight') || latestMetric(g.id, 'bodyFat');
     const d = w ? daysBetween(w.date, t) : null;
-    if (d == null) tips.push({ icon: '⚖️', text: `Добавь первый замер для цели «${g.title}», чтобы видеть прогресс.`, tab: 'goals' });
-    else if (d >= 7) tips.push({ icon: '⚖️', text: `Последний замер был ${d} ${plural(d, 'день', 'дня', 'дней')} назад. Взвесься утром натощак.`, tab: 'goals' });
+    if (d == null) tips.push({ icon: 'scale', text: `Добавь первый замер для цели «${g.title}», чтобы видеть прогресс.`, tab: 'goals' });
+    else if (d >= 7) tips.push({ icon: 'scale', text: `Последний замер был ${d} ${plural(d, 'день', 'дня', 'дней')} назад. Взвесься утром натощак.`, tab: 'goals' });
   }
 
   // Задачи
   const overdue = active('tasks').filter((x) => (!x.repeat || x.repeat === 'none') && !x.done && x.due && x.due < t);
-  if (overdue.length) tips.push({ icon: '⏰', text: `${overdue.length} ${plural(overdue.length, 'задача просрочена', 'задачи просрочены', 'задач просрочено')}. Перенеси их или отметь выполненными.`, tab: 'tasks' });
+  if (overdue.length) tips.push({ icon: 'clock', text: `${overdue.length} ${plural(overdue.length, 'задача просрочена', 'задачи просрочены', 'задач просрочено')}. Перенеси их или отметь выполненными.`, tab: 'tasks' });
   const habits = todayTasks().filter((x) => x.repeat === 'daily');
   const left = habits.filter((h) => !isDone(h));
-  if (habits.length && !left.length) tips.push({ icon: '🔥', text: 'Все привычки на сегодня выполнены. Так держать!', tab: 'tasks' });
+  if (habits.length && !left.length) tips.push({ icon: 'flame', text: 'Все привычки на сегодня выполнены. Так держать!', tab: 'tasks' });
 
   // Финансовая цель без копилки
   for (const g of active('goals').filter((x) => x.kind === 'money' && !byId('piggies', x.piggyId))) {
-    tips.push({ icon: '🐷', text: `Привяжи копилку к цели «${g.title}», тогда прогресс будет считаться сам.`, tab: 'goals' });
+    tips.push({ icon: 'piggy', text: `Привяжи копилку к цели «${g.title}», тогда прогресс будет считаться сам.`, tab: 'goals' });
   }
   return tips;
 }

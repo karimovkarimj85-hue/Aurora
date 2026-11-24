@@ -2,6 +2,7 @@ import {
   state, saveSettings, exportData, importData, resetAll, archived, save, remove, piggySaved, active, byId,
 } from '../store.js';
 import { businessForm } from '../bizforms.js';
+import { wordmark } from '../icons.js';
 import { icon } from '../icons.js';
 import { esc, CURRENCIES, today, money, humanDate } from '../util.js';
 import { toast, confirmSheet, openSheet } from '../ui.js';
@@ -15,7 +16,7 @@ export function render() {
   <header class="page-head"><button class="icon-btn lg" data-action="nav" data-to="today" aria-label="Назад">${icon('back', { size: 20, w: 2.2 })}</button><h1 class="grow">Настройки</h1></header>
 
   ${standalone ? '' : `<section class="card install">
-    <h3>📲 Установи Аврору на iPhone</h3>
+    <h3>Установи Аврору на iPhone</h3>
     <ol class="steps">
       <li>Открой этот сайт в <b>Safari</b>.</li>
       <li>Нажми кнопку <b>«Поделиться»</b> (квадрат со стрелкой).</li>
@@ -44,7 +45,11 @@ export function render() {
     <h3 class="card-title">ИИ (Claude)</h3>
     <label class="field"><span>Ключ API Anthropic</span>
       <input name="apiKey" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" value="${esc(s.apiKey)}" placeholder="sk-ant-..."></label>
-    <p class="hint">Ключ хранится только на этом телефоне и отправляется напрямую в Anthropic. Получить его можно на platform.claude.com → API Keys. Никому не показывай ключ.</p>
+    <div class="hint ai-explain">
+      <p><b>Подписка Claude и ключ API — разные вещи.</b> Подписка (Pro/Max) работает в приложении Claude, и Аврора пользуется ею через кнопку «Спросить Claude»: собирает сводку и открывает Claude. Взять ключ из подписки нельзя, и я не могу создать его за тебя.</p>
+      <p>Чтобы ИИ работал прямо внутри Авроры (сам записывал траты из фото, вёл сделки из чата), нужен отдельный ключ: <b>platform.claude.com → Billing</b> (пополнить от $5) → <b>API Keys → Create Key</b>. Ключ хранится только на этом телефоне и отправляется напрямую в Anthropic.</p>
+      <p>Без ключа работает умный ввод: «кофе 350», «вес 82,4», SMS банка.</p>
+    </div>
     <label class="field"><span>Модель</span><select name="model">${MODELS.map((m) => `<option value="${m.id}" ${m.id === s.model ? 'selected' : ''}>${m.name} — ${m.note}</option>`).join('')}</select></label>
     <label class="field"><span>Глубина ответов</span><select name="effort">${EFFORTS.map((e) => `<option value="${e.id}" ${e.id === s.effort ? 'selected' : ''}>${e.name} — ${e.note}</option>`).join('')}</select></label>
     <div class="row gap">
@@ -56,13 +61,13 @@ export function render() {
   <section class="card">
     <h3 class="card-title">Данные</h3>
     <p class="hint">Все данные хранятся только на этом устройстве. Делай резервную копию раз в неделю и сохраняй её в «Файлы → iCloud Drive».</p>
-    <button class="btn btn-ghost btn-block" data-action="export">💾 Сохранить резервную копию</button>
-    <label class="btn btn-ghost btn-block">📂 Восстановить из копии<input type="file" accept="application/json,.json" id="import-input" hidden></label>
-    <button class="btn btn-ghost btn-block" data-action="nav" data-to="archive">🗄 Архив${archCount ? ` (${archCount})` : ''}</button>
+    <button class="btn btn-ghost btn-block" data-action="export">Сохранить резервную копию</button>
+    <label class="btn btn-ghost btn-block">Восстановить из копии<input type="file" accept="application/json,.json" id="import-input" hidden></label>
+    <button class="btn btn-ghost btn-block" data-action="nav" data-to="archive">Архив${archCount ? ` (${archCount})` : ''}</button>
     <button class="btn btn-ghost-danger btn-block" data-action="reset">Стереть все данные</button>
   </section>
 
-  <p class="muted center small pad">Аврора · версия 2.0 · данные хранятся на устройстве</p>`;
+  <div class="brand-foot">${wordmark(140)}<p class="brand-sub">BY GAIN TECH · версия 3.0</p><p class="muted small">Данные хранятся только на этом устройстве</p></div>`;
 }
 
 export function mount(container) {
@@ -104,7 +109,7 @@ export const actions = {
     el.disabled = true; el.textContent = 'Проверяю…';
     const r = await testKey(key, form.model.value);
     el.disabled = false; el.textContent = 'Проверить';
-    toast(r.ok ? 'Ключ работает ✓' : r.error, { ms: 5000 });
+    toast(r.ok ? 'Ключ работает' : r.error, { ms: 5000 });
   },
   export: async () => {
     const json = JSON.stringify(exportData(), null, 1);
@@ -134,9 +139,9 @@ export const actions = {
 // ---------------- Архив ----------------
 
 const ARCH_SECTIONS = [
-  ['goals', 'Цели', (x) => `${x.emoji || '🎯'} ${x.title}`],
-  ['piggies', 'Копилки', (x) => `${x.emoji || '🐷'} ${x.name} · ${money(piggySaved(x.id))}`],
-  ['tasks', 'Задачи', (x) => `${x.done ? '✓ ' : ''}${x.title}${x.doneAt ? ' · ' + humanDate(x.doneAt.slice(0, 10)) : ''}`],
+  ['goals', 'Цели', (x) => x.title],
+  ['piggies', 'Копилки', (x) => `${x.name} · ${money(piggySaved(x.id))}`],
+  ['tasks', 'Задачи', (x) => `${x.title}${x.doneAt ? ' · ' + humanDate(x.doneAt.slice(0, 10)) : ''}`],
   ['accounts', 'Счета', (x) => x.name],
   ['businesses', 'Бизнесы', (x) => x.name],
   ['deals', 'Сделки', (x) => `${x.title} · ${money(x.amount)}`],

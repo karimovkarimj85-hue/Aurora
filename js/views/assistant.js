@@ -1,7 +1,8 @@
 import { state, saveChat } from '../store.js';
 import { icon } from '../icons.js';
 import { esc } from '../util.js';
-import { toast, confirmSheet } from '../ui.js';
+import { toast, confirmSheet, openSheet } from '../ui.js';
+import { parseQuick, runQuick, claudeBrief, CLAUDE_URL } from '../quick.js';
 import { runTurn, describeTool, isStamp, undoRegistry, undone } from '../ai.js';
 
 let busy = false;
@@ -54,7 +55,7 @@ function renderHistory() {
       const files = blocks.filter((b) => b.type === 'text' && b.text.startsWith('<file'));
       html += `<div class="msg user">
         ${imgs.map((b) => `<img class="msg-img" alt="Фото" src="data:${b.source.media_type};base64,${b.source.data}">`).join('')}
-        ${files.map((b) => `<span class="file-chip">📎 ${esc((b.text.match(/name="([^"]+)"/) || [])[1] || 'файл')}</span>`).join('')}
+        ${files.map((b) => `<span class="file-chip">${icon('paperclip', { size: 14 })} ${esc((b.text.match(/name="([^"]+)"/) || [])[1] || 'файл')}</span>`).join('')}
         ${texts.map((b) => `<div class="bubble">${md(b.text)}</div>`).join('')}
       </div>`;
     } else {
@@ -70,7 +71,7 @@ function renderHistory() {
             continue;
           }
           html += `<div class="msg ai"><div class="action-chip ${ok ? 'ok' : 'err'}">
-            <span>${ok ? '✓' : '⚠️'} ${esc(ok ? label : (r?.content || label))}</span>
+            <span>${esc(ok ? label : (r?.content || label))}</span>
             ${ok && undoRegistry.has(b.id) ? `<button class="link" data-action="undo" data-id="${b.id}">Отменить</button>` : ''}
           </div></div>`;
         }
@@ -80,36 +81,84 @@ function renderHistory() {
   return html;
 }
 
+// ---------- Режим без ключа API ----------
+const LOCAL_SUGGESTIONS = ['кофе 350', 'зарплата 85к', 'вес 82,4', 'задача: позвонить клиенту завтра'];
+let localLog = (() => { try { return JSON.parse(localStorage.getItem('aurora-local-chat') || '[]'); } catch { return []; } })();
+function saveLocal() {
+  try { localStorage.setItem('aurora-local-chat', JSON.stringify(localLog.slice(-60).map((m) => ({ role: m.role, text: m.text, undone: m.undone })))); } catch { /* приватный режим */ }
+}
+function renderLocal() {
+  return localLog.map((m, i) => (m.role === 'user'
+    ? `<div class="msg user"><div class="bubble">${md(m.text)}</div></div>`
+    : `<div class="msg ai"><div class="bubble ${m.undone ? 'undone' : ''}">${md(m.text)}${m.undo ? `<button class="link" data-action="local-undo" data-i="${i}">Отменить</button>` : ''}</div></div>`)).join('');
+}
+async function sendLocal(t, rerender) {
+  if (!t) { toast('Без ключа ИИ я не умею читать фото и файлы. Нажми «Спросить Claude»'); pending = []; rerender(); return; }
+  pending = [];
+  localLog.push({ role: 'user', text: t });
+  const parsed = parseQuick(t);
+  let reply;
+  try { reply = parsed ? await runQuick(parsed) : null; } catch (e) { reply = { text: `Не получилось: ${e.message}` }; }
+  localLog.push(reply ? { role: 'ai', text: reply.text, undo: reply.undo } : {
+    role: 'ai',
+    text: 'Не поняла фразу. Примеры: «такси 600», «доход 50к», «вес 82,4», «задача: …». Для вопросов и советов нажми «Спросить Claude» вверху.',
+  });
+  saveLocal(); rerender(); scrollDown();
+}
+
+function askClaudeSheet() {
+  const close = openSheet({
+    title: 'Спросить Claude',
+    body: `<form class="form">
+      <p class="hint">Аврора соберёт короткую сводку (деньги, бизнесы, цели, задачи), скопирует её и откроет Claude. Если Claude откроется пустым, вставь текст в поле сообщения.</p>
+      <label class="field"><span>Вопрос (необязательно)</span><textarea name="q" rows="3" placeholder="Например: как мне быстрее накопить на дом? Что улучшить в ZK POS?"></textarea></label>
+      <button class="btn btn-primary btn-block" type="submit">${icon('sparkles', { size: 18 })} Скопировать и открыть Claude</button>
+      <button class="btn btn-ghost btn-block" type="button" data-preview>Показать сводку</button>
+      <pre class="brief" hidden></pre>
+    </form>`,
+    onMount(el) {
+      el.querySelector('[data-preview]').addEventListener('click', () => {
+        const pre = el.querySelector('.brief'); pre.textContent = claudeBrief(el.querySelector('[name=q]').value); pre.hidden = false;
+      });
+    },
+    async onSubmit(d) {
+      const text = claudeBrief(d.q.trim());
+      try { await navigator.clipboard.writeText(text); } catch { /* без доступа к буферу */ }
+      const url = text.length < 6000 ? `${CLAUDE_URL}?q=${encodeURIComponent(text)}` : CLAUDE_URL;
+      window.open(url, '_blank', 'noopener');
+      toast('Сводка скопирована');
+      void close;
+    },
+  });
+}
+
 export function render() {
   const hasKey = !!state.settings.apiKey;
   return `
   <div class="chat-page">
     <header class="page-head compact">
-      <div><h1>Аврора</h1><p class="eyebrow">ИИ-помощник</p></div>
-      ${state.chat.length ? `<button class="icon-btn lg tinted" data-action="new-chat" aria-label="Новый диалог">${icon('compose', { size: 20 })}</button>` : ''}
+      <div><h1>Аврора</h1><p class="eyebrow">${hasKey ? 'ИИ-помощник на Claude' : 'Умный ввод · без ключа ИИ'}</p></div>
+      <div class="row gap">
+        <button class="icon-btn lg" data-action="ask-claude" aria-label="Спросить Claude">${icon('sparkles', { size: 20 })}</button>
+        ${(hasKey ? state.chat.length : localLog.length) ? `<button class="icon-btn lg tinted" data-action="new-chat" aria-label="Новый диалог">${icon('compose', { size: 20 })}</button>` : ''}
+      </div>
     </header>
     <div class="chat-scroll" id="chat-scroll">
-      ${!hasKey ? `<div class="card">
-        <h3>Подключи ИИ</h3>
-        <p class="muted">Аврора работает на Claude. Нужен личный ключ API: он хранится только на твоём телефоне.</p>
-        <ol class="steps">
-          <li>Открой <b>platform.claude.com</b> и зарегистрируйся.</li>
-          <li>Пополни баланс на $5: этого хватит надолго.</li>
-          <li>Раздел <b>API Keys → Create Key</b>, скопируй ключ.</li>
-          <li>Вставь его в Настройках Авроры.</li>
-        </ol>
-        <button class="btn btn-primary btn-block" data-action="nav" data-to="settings">Открыть настройки</button>
+      ${!hasKey && !localLog.length ? `<div class="card ai-off">
+        <p><b>ИИ пока не подключён, но я уже понимаю простые фразы.</b> Пиши «кофе 350», «зарплата 85к», «вес 82,4», «задача: позвонить Самсе завтра», «ZK POS продал 2 кассы 12 млн» или вставь SMS банка.</p>
+        <p class="muted small">Для советов и анализа нажми ${icon('sparkles', { size: 14, cls: 'inline' })} «Спросить Claude»: Аврора соберёт сводку и откроет твоё приложение Claude, оно входит в подписку. Полноценный ИИ внутри Авроры включается ключом API в настройках.</p>
       </div>` : ''}
-      ${!state.chat.length ? `<div class="chat-hello">
+      ${hasKey && !state.chat.length ? `<div class="chat-hello">
         <img class="app-icon" src="icons/icon.svg" alt="">
         <p>Привет! Я Аврора. Пиши мне траты («такси 600»), замеры («вес 81,2»), продажи и клиентов ZK POS и Gain CRM, задачи. Присылай скриншоты экранного времени или чеки и спрашивай совета по деньгам, бизнесу, телу и привычкам.</p>
         <div class="chips center">${SUGGESTIONS.map((s) => `<button class="chip" data-action="suggest" data-text="${esc(s)}">${esc(s)}</button>`).join('')}</div>
       </div>` : ''}
-      <div id="chat-list">${renderHistory()}</div>
+      <div id="chat-list">${hasKey ? renderHistory() : renderLocal()}</div>
+      ${!hasKey && !localLog.length ? `<div class="chips center">${LOCAL_SUGGESTIONS.map((s) => `<button class="chip" data-action="suggest" data-text="${esc(s)}">${esc(s)}</button>`).join('')}</div>` : ''}
       <div id="chat-live"></div>
     </div>
     <form class="composer" id="composer">
-      <div id="attach-list" class="attach-list">${pending.map((p, i) => `<span class="attach">${p.preview ? `<img src="${p.preview}" alt="">` : '📎'} ${esc(p.name)}<button type="button" data-action="unattach" data-i="${i}" aria-label="Убрать">✕</button></span>`).join('')}</div>
+      <div id="attach-list" class="attach-list">${pending.map((p, i) => `<span class="attach">${p.preview ? `<img src="${p.preview}" alt="">` : icon('paperclip', { size: 14 })} ${esc(p.name)}<button type="button" data-action="unattach" data-i="${i}" aria-label="Убрать">${icon('close', { size: 12 })}</button></span>`).join('')}</div>
       <div class="composer-row">
         <label class="icon-btn attach-btn" aria-label="Прикрепить фото или файл">${icon('paperclip', { size: 20 })}
           <input type="file" id="file-input" accept="image/*,.txt,.json,.csv,.html" multiple hidden></label>
@@ -179,7 +228,7 @@ async function send(text, rerender) {
   if (busy) return;
   const t = text.trim();
   if (!t && !pending.length) return;
-  if (!state.settings.apiKey) { toast('Сначала добавь ключ API в настройках'); return; }
+  if (!state.settings.apiKey) { await sendLocal(t, rerender); return; }
   const blocks = [...pending.map((p) => p.block)];
   if (t) blocks.push({ type: 'text', text: t });
   else blocks.push({ type: 'text', text: pending.some((p) => p.kind === 'image') ? 'Посмотри вложение и сделай, что нужно.' : 'Проанализируй файл.' });
@@ -192,7 +241,7 @@ async function send(text, rerender) {
   // Временно показываем сообщение пользователя и «живой» ответ
   const list = document.getElementById('chat-list');
   list.insertAdjacentHTML('beforeend', `<div class="msg user">${userPreview.filter((p) => p.preview).map((p) => `<img class="msg-img" src="${p.preview}" alt="">`).join('')}
-    ${userPreview.filter((p) => p.kind === 'text').map((p) => `<span class="file-chip">📎 ${esc(p.name)}</span>`).join('')}
+    ${userPreview.filter((p) => p.kind === 'text').map((p) => `<span class="file-chip">${icon('paperclip', { size: 14 })} ${esc(p.name)}</span>`).join('')}
     ${t ? `<div class="bubble">${md(t)}</div>` : ''}</div>`);
   const live = document.getElementById('chat-live');
   live.innerHTML = '<div class="msg ai"><div class="bubble typing"><span class="status">думаю…</span><div class="live-text"></div></div></div>';
@@ -206,7 +255,7 @@ async function send(text, rerender) {
     onText(delta) { acc += delta; liveText.innerHTML = md(acc); status.textContent = ''; scrollDown(); },
     onStatus(s) { if (status) status.textContent = s; },
     onToolDone({ label, ok }) {
-      live.insertAdjacentHTML('afterbegin', `<div class="msg ai"><div class="action-chip ${ok ? 'ok' : 'err'}"><span>${ok ? '✓' : '⚠️'} ${esc(label)}</span></div></div>`);
+      live.insertAdjacentHTML('afterbegin', `<div class="msg ai"><div class="action-chip ${ok ? 'ok' : 'err'}"><span>${esc(label)}</span></div></div>`);
       acc = ''; liveText.innerHTML = '';
     },
   });
@@ -262,7 +311,15 @@ export const actions = {
     toast('Действие отменено');
     rerender();
   },
+  'ask-claude': () => askClaudeSheet(),
+  'local-undo': async (el, _e, rerender) => {
+    const m = localLog[Number(el.dataset.i)];
+    if (!m?.undo) return;
+    await m.undo(); m.undo = null; m.undone = true;
+    saveLocal(); toast('Отменено'); rerender();
+  },
   'new-chat': async (_el, _e, rerender) => {
+    if (!state.settings.apiKey) { localLog = []; saveLocal(); rerender(); return; }
     if (await confirmSheet('Новый диалог?', 'История переписки с Авророй очистится. Все записи (траты, задачи, замеры) останутся.', { ok: 'Очистить', danger: false })) {
       await saveChat([]);
       undoRegistry.clear();

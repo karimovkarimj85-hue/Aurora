@@ -1,11 +1,11 @@
 // Формы бизнес-модуля: бизнес, клиент, сделка, регулярный платёж.
 import {
-  state, save, remove, byId, active, DEAL_STAGES, CLIENT_STATUS, PERIODS, BIZ_KINDS,
+  state, save, remove, byId, active, CLIENT_STATUS, PERIODS, BIZ_KINDS,
   businessAccount, paySubscription, clientName, accountBalance,
 } from './store.js';
 import { openSheet, toast, confirmSheet } from './ui.js';
 import { esc, today, parseAmount, money, currency } from './util.js';
-import { txForm } from './forms.js';
+import { dealForm } from './deals.js';
 
 const opt = (v, label, sel) => `<option value="${esc(v)}" ${sel ? 'selected' : ''}>${esc(label)}</option>`;
 const amountField = (name, value, label = 'Сумма', required = false) => `
@@ -44,7 +44,6 @@ export function businessForm(existing = null) {
       <label class="field"><span>Название</span><input name="name" value="${esc(b.name || '')}" required ${existing ? '' : 'autofocus'}></label>
       <label class="field"><span>Чем занимается</span><input name="about" value="${esc(b.about || '')}" placeholder="Коротко"></label>
       <label class="field"><span>Модель</span><select name="kind">${Object.entries(BIZ_KINDS).map(([k, v]) => opt(k, v, k === b.kind)).join('')}</select></label>
-      <div class="field"><span>Цвет</span><div class="chips">${COLORS.map((c) => `<label class="chip-radio color"><input type="radio" name="color" value="${c}" ${c === b.color ? 'checked' : ''}><span style="--c:${c}"></span></label>`).join('')}</div></div>
       <label class="field"><span>Цель выручки в месяц (необязательно)</span><input name="revenueGoal" inputmode="decimal" value="${b.revenueGoal ?? ''}" placeholder="например, 2 млн"></label>
       <button class="btn btn-primary btn-block" type="submit">${existing ? 'Сохранить' : 'Создать'}</button>
       ${existing ? `<button class="btn btn-ghost btn-block" type="button" data-arch>${existing.archived ? 'Вернуть из архива' : 'В архив'}</button>` : ''}
@@ -107,68 +106,8 @@ export function clientForm(existing = null, bizId = existing?.businessId) {
   });
 }
 
-// ---------------- Сделка ----------------
-
-export function dealForm(existing = null, bizId = existing?.businessId, preset = {}) {
-  const dl = existing || { stage: 'lead', businessId: bizId, ...preset };
-  openSheet({
-    title: existing ? 'Сделка' : 'Новая сделка',
-    body: `<form class="form">
-      <label class="field"><span>Что продаём</span><input name="title" value="${esc(dl.title || '')}" placeholder="Например: 2 кассы + внедрение" required ${existing ? '' : 'autofocus'}></label>
-      ${amountField('amount', dl.amount, 'Сумма сделки')}
-      <label class="field"><span>Клиент</span>${clientSelect(dl.businessId, dl.clientId)}</label>
-      ${newClientField}
-      <label class="field"><span>Этап</span><select name="stage">${DEAL_STAGES.map((s) => opt(s.id, s.name, s.id === dl.stage)).join('')}</select></label>
-      <label class="field"><span>Ожидаемая дата оплаты</span><input type="date" name="expectedDate" value="${esc(dl.expectedDate || '')}"></label>
-      <label class="field"><span>Заметки</span><textarea name="note" rows="2">${esc(dl.note || '')}</textarea></label>
-      <button class="btn btn-primary btn-block" type="submit">${existing ? 'Сохранить' : 'Добавить'}</button>
-      ${existing ? `<button class="btn btn-ghost btn-block" type="button" data-arch>В архив</button>
-        <button class="btn btn-ghost-danger btn-block" type="button" data-del>Удалить сделку</button>` : ''}
-    </form>`,
-    onMount(el, close) {
-      bindNewClient(el);
-      el.querySelector('[data-arch]')?.addEventListener('click', async () => { await save('deals', { ...existing, archived: true }); close(); toast('Сделка в архиве'); });
-      el.querySelector('[data-del]')?.addEventListener('click', async () => {
-        if (await confirmSheet('Удалить сделку?', 'Записанные оплаты останутся в финансах.')) { await remove('deals', existing.id); close(); toast('Удалено'); }
-      });
-    },
-    async onSubmit(d) {
-      const clientId = await resolveClient(d, dl.businessId);
-      const stageChanged = !existing || existing.stage !== d.stage;
-      const saved = await save('deals', {
-        ...(existing || {}), businessId: dl.businessId, title: d.title.trim(), amount: num(d.amount) || 0,
-        clientId, stage: d.stage, expectedDate: d.expectedDate || null, note: d.note.trim(),
-        stageChangedAt: stageChanged ? new Date().toISOString() : existing.stageChangedAt,
-        closedAt: ['won', 'lost'].includes(d.stage) ? (existing?.closedAt || new Date().toISOString()) : null,
-      });
-      if (clientId && d.stage === 'won') {
-        const c = byId('clients', clientId);
-        if (c && c.status !== 'active') await save('clients', { ...c, status: 'active' });
-      }
-      toast('Сделка сохранена');
-      if (stageChanged && d.stage === 'won' && saved.amount > 0 && !state.transactions.some((t) => t.dealId === saved.id)) {
-        setTimeout(() => offerDealPayment(saved), 260);
-      }
-    },
-  });
-}
-
-/** После «Оплачено» — предложить записать доход */
-export function offerDealPayment(deal) {
-  txForm(null, 'income', {
-    businessId: deal.businessId,
-    preset: { amount: deal.amount, categoryId: 'biz_sale', note: deal.title, dealId: deal.id, clientId: deal.clientId },
-  });
-}
-
-export async function moveDeal(deal, dir) {
-  const i = DEAL_STAGES.findIndex((s) => s.id === deal.stage);
-  const next = DEAL_STAGES[Math.min(DEAL_STAGES.length - 2, Math.max(0, i + dir))]; // не перескакиваем на «Отказ»
-  if (!next || next.id === deal.stage) return;
-  const saved = await save('deals', { ...deal, stage: next.id, stageChangedAt: new Date().toISOString(), closedAt: next.id === 'won' ? new Date().toISOString() : null });
-  toast(`«${deal.title}» → ${next.name}`);
-  if (next.id === 'won' && saved.amount > 0 && !state.transactions.some((t) => t.dealId === saved.id)) offerDealPayment(saved);
-}
+// Сделки вынесены в deals.js
+export { dealForm, moveDeal, dealSheet } from './deals.js';
 
 // ---------------- Регулярный платёж (подписка / обслуживание) ----------------
 
@@ -187,10 +126,10 @@ export function subscriptionForm(existing = null, bizId = existing?.businessId) 
         <label class="field" style="width:130px"><span>Период</span><select name="period">${Object.entries(PERIODS).map(([k, v]) => opt(k, v.name, k === s.period)).join('')}</select></label>
       </div>
       <label class="field"><span>Следующая оплата</span><input type="date" name="nextDate" value="${esc(s.nextDate || today())}" required></label>
-      <label class="field"><span>Категория дохода</span><select name="categoryId">${state.categories.filter((c) => c.scope === 'biz' && c.kind === 'income').map((c) => opt(c.id, `${c.emoji} ${c.name}`, c.id === s.categoryId)).join('')}</select></label>
+      <label class="field"><span>Категория дохода</span><select name="categoryId">${state.categories.filter((c) => c.scope === 'biz' && c.kind === 'income').map((c) => opt(c.id, c.name, c.id === s.categoryId)).join('')}</select></label>
       <label class="check"><input type="checkbox" name="active" ${s.active !== false ? 'checked' : ''}> Активна</label>
       <button class="btn btn-primary btn-block" type="submit">${existing ? 'Сохранить' : 'Добавить'}</button>
-      ${existing ? `<button class="btn btn-ghost btn-block" type="button" data-pay>✓ Отметить оплату</button>
+      ${existing ? `<button class="btn btn-ghost btn-block" type="button" data-pay>Отметить оплату</button>
         <button class="btn btn-ghost-danger btn-block" type="button" data-del>Удалить</button>` : ''}
     </form>`,
     onMount(el, close) {
@@ -234,7 +173,7 @@ export function payForm(sub) {
       const amount = num(d.amount);
       if (!(amount > 0)) throw new Error('Укажи сумму');
       await paySubscription(sub, { amount, accountId: d.accountId, date: d.date || today() });
-      toast(`Оплата ${money(amount)} записана ✓`);
+      toast(`Оплата ${money(amount)} записана`);
     },
   });
 }

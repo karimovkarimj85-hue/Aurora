@@ -2,7 +2,8 @@ import {
   state, active, byId, accountBalance, piggySaved, piggyMonthlyNeed, monthStats, sortedTransactions,
   totalBalance, totalSaved, remove, personalAccounts,
 } from '../store.js';
-import { icon } from '../icons.js';
+import { tile, catIcon, piggyIcon, ACC_ICON, icon } from '../icons.js';
+import { importSheet, autoImportSheet, inboxSheet } from '../bankui.js';
 import { money, moneyShort, esc, humanDate, monthKey, today, monthName, addDays, pct } from '../util.js';
 import { bar, emptyState, confirmSheet, toast } from '../ui.js';
 import { hbars, columns } from '../charts.js';
@@ -12,12 +13,11 @@ let seg = 'ops';
 let month = monthKey(today());
 let showAll = false;
 
-const ACC_ICON = { cash: '💵', card: '💳', savings: '🏦' };
 
 function opsView() {
   const list = sortedTransactions();
   if (!list.length) {
-    return emptyState('🧾', 'Операций пока нет', 'Записывай каждую трату, так через месяц станет видно, куда уходят деньги.',
+    return emptyState('receipt', 'Операций пока нет', 'Записывай каждую трату, так через месяц станет видно, куда уходят деньги.',
       '<button class="btn btn-primary" data-action="add-tx">Добавить первую</button>');
   }
   const shown = showAll ? list : list.slice(0, 60);
@@ -36,23 +36,23 @@ function opsView() {
 }
 
 function txRow(t) {
-  let icon = '📦'; let title = ''; let sub = ''; let amountCls = ''; let amount = '';
+  let ic = 'box'; let title = ''; let sub = ''; let amountCls = ''; let amount = '';
   const acc = byId('accounts', t.accountId);
   if (t.type === 'transfer') {
-    icon = '🔁'; title = 'Перевод'; sub = `${acc?.name || '?'} → ${byId('accounts', t.toAccountId)?.name || '?'}`; amount = money(t.amount);
+    ic = 'repeat'; title = 'Перевод'; sub = `${acc?.name || '?'} → ${byId('accounts', t.toAccountId)?.name || '?'}`; amount = money(t.amount);
   } else if (t.type === 'piggy') {
     const p = byId('piggies', t.piggyId);
-    icon = p?.emoji || '🐷'; title = t.amount >= 0 ? `В копилку «${p?.name || '?'}»` : `Из копилки «${p?.name || '?'}»`;
+    ic = piggyIcon(p); title = t.amount >= 0 ? `В копилку «${p?.name || '?'}»` : `Из копилки «${p?.name || '?'}»`;
     sub = acc?.name || ''; amount = money(Math.abs(t.amount)); amountCls = 'muted';
   } else {
     const c = byId('categories', t.categoryId);
-    icon = c?.emoji || '📦'; title = c?.name || 'Без категории'; sub = acc?.name || '';
+    ic = catIcon(c); title = c?.name || 'Без категории'; sub = acc?.name || '';
     amount = money(t.type === 'income' ? t.amount : -t.amount, { sign: true });
     amountCls = t.type === 'income' ? 'pos' : '';
   }
   if (t.note) sub = `${t.note}${sub ? ' · ' + sub : ''}`;
   return `<li class="row-item" data-action="edit-tx" data-id="${t.id}">
-    <span class="row-icon">${icon}</span>
+    ${tile(ic)}
     <div class="grow"><span class="row-title">${esc(title)}</span><span class="row-sub">${esc(sub)}</span></div>
     <span class="row-amount ${amountCls}">${amount}</span>
   </li>`;
@@ -61,22 +61,33 @@ function txRow(t) {
 function accountsView() {
   const accs = personalAccounts();
   return `<div class="card total-line"><span class="muted">Итого на счетах</span><b>${money(totalBalance())}</b></div>
-    <ul class="list card">${accs.map((a) => `
-      <li class="row-item" data-action="edit-account" data-id="${a.id}">
-        <span class="row-icon">${ACC_ICON[a.type] || '💳'}</span>
-        <div class="grow"><span class="row-title">${esc(a.name)}</span><span class="row-sub">${{ cash: 'Наличные', card: 'Карта', savings: 'Вклад' }[a.type] || ''}</span></div>
+    <ul class="list card">${accs.map((a) => {
+      const sub = a.type === 'card'
+        ? [a.bank, a.last4 ? (a.name.includes(a.last4) ? '' : `•${a.last4}`) : 'без номера', a.syncedAt ? 'сверено с банком' : ''].filter(Boolean).join(' · ')
+        : { cash: 'Наличные', savings: 'Вклад' }[a.type] || '';
+      return `<li class="row-item" data-action="edit-account" data-id="${a.id}">
+        ${tile(ACC_ICON[a.type] || 'creditcard')}
+        <div class="grow"><span class="row-title">${esc(a.name)}</span><span class="row-sub">${esc(sub)}</span></div>
         <span class="row-amount">${money(accountBalance(a.id))}</span>
-      </li>`).join('')}
+      </li>`;
+    }).join('')}
     </ul>
-    <button class="btn btn-ghost btn-block" data-action="add-account">＋ Добавить счёт</button>
-    <button class="btn btn-ghost btn-block" data-action="add-transfer">🔁 Перевод между счетами</button>`;
+    <h2 class="section-title">Операции из банка</h2>
+    <ul class="list card">
+      <li class="row-item" data-action="sms-import">${tile('message')}<div class="grow"><span class="row-title">Вставить SMS из банка</span><span class="row-sub">Одно или пачкой: сумма, магазин, категория</span></div>${icon('chevron', { size: 16, cls: 'muted' })}</li>
+      <li class="row-item" data-action="auto-import">${tile('repeat')}<div class="grow"><span class="row-title">Автоимпорт</span><span class="row-sub">${state.settings.ntfyTopic ? 'Включён · через «Команды» iPhone' : 'Выключен'}</span></div>${icon('chevron', { size: 16, cls: 'muted' })}</li>
+      ${state.inbox.length ? `<li class="row-item" data-action="inbox">${tile('inbox', 'warn')}<div class="grow"><span class="row-title">Нераспознанные</span><span class="row-sub">${state.inbox.length} сообщ.</span></div>${icon('chevron', { size: 16, cls: 'muted' })}</li>` : ''}
+    </ul>
+    <p class="hint">Добавь у карты последние 4 цифры, и Аврора сама поймёт, к какой карте относится SMS.</p>
+    <button class="btn btn-ghost btn-block" data-action="add-account">Добавить карту или счёт</button>
+    <button class="btn btn-ghost btn-block" data-action="add-transfer">Перевод между счетами</button>`;
 }
 
 function piggiesView() {
   const list = active('piggies');
   const head = `<div class="card total-line"><span class="muted">Всего в копилках</span><b>${money(totalSaved())}</b></div>`;
   if (!list.length) {
-    return head + emptyState('🐷', 'Копилок пока нет', 'Создай копилку под цель: подушка безопасности, дом, отпуск.',
+    return head + emptyState('piggy', 'Копилок пока нет', 'Создай копилку под цель: подушка безопасности, дом, отпуск.',
       '<button class="btn btn-primary" data-action="add-piggy">Создать копилку</button>');
   }
   return head + list.map((p) => {
@@ -84,7 +95,7 @@ function piggiesView() {
     const need = piggyMonthlyNeed(p);
     return `<article class="card piggy">
       <div class="piggy-head" data-action="edit-piggy" data-id="${p.id}">
-        <span class="piggy-emoji">${p.emoji || '🐷'}</span>
+        ${tile(piggyIcon(p), 'lg')}
         <div class="grow"><h3>${esc(p.name)}</h3>
           <p class="muted">${money(saved)}${p.target ? ` из ${money(p.target)}` : ''}${p.deadline ? ` · до ${esc(humanDate(p.deadline))}` : ''}</p></div>
         ${p.target ? `<b>${pct(saved, p.target)}%</b>` : ''}
@@ -125,7 +136,7 @@ function statsView() {
     </div>
     <section class="card">
       <h3 class="card-title">Расходы по категориям</h3>
-      ${s.cats.length ? hbars(s.cats.map((c) => ({ label: c.cat.name, emoji: c.cat.emoji, value: c.sum })), money) : '<p class="muted">В этом месяце расходов нет</p>'}
+      ${s.cats.length ? hbars(s.cats.map((c) => ({ label: c.cat.name, value: c.sum })), money) : '<p class="muted">В этом месяце расходов нет</p>'}
     </section>
     <section class="card">
       <h3 class="card-title">Траты за 14 дней</h3>
@@ -159,6 +170,9 @@ export const actions = {
     txForm(t);
   },
   'add-account': () => accountForm(),
+  'sms-import': () => importSheet(),
+  'auto-import': () => autoImportSheet(),
+  inbox: () => inboxSheet(),
   'edit-account': (el) => accountForm(byId('accounts', el.dataset.id)),
   'add-piggy': () => piggyForm(),
   'edit-piggy': (el) => piggyForm(byId('piggies', el.dataset.id)),

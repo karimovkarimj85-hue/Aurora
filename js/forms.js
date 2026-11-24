@@ -3,6 +3,8 @@ import {
   state, save, remove, byId, active, accountBalance, piggySaved, METRIC_PRESETS, upsertMetric,
   personalAccounts,
 } from './store.js';
+import { icon, piggyIcon, PIGGY_ICONS, catIcon } from './icons.js';
+import { learnRule } from './bank.js';
 import { openSheet, toast, confirmSheet } from './ui.js';
 import { esc, today, parseAmount, money, currency } from './util.js';
 
@@ -51,7 +53,7 @@ export function txForm(existing = null, presetType = 'expense', { businessId = n
   const catsFor = (kind) => state.categories.filter((c) => c.kind === kind && (c.scope || 'personal') === scope);
   const catChips = (kind, sel) => catsFor(kind).map((c) => `
     <label class="chip-radio"><input type="radio" name="categoryId" value="${c.id}" ${c.id === sel ? 'checked' : ''}>
-      <span>${c.emoji} ${esc(c.name)}</span></label>`).join('');
+      <span>${icon(catIcon(c), { size: 16, w: 1.9 })} ${esc(c.name)}</span></label>`).join('');
 
   openSheet({
     title: biz ? `${existing ? 'Операция' : 'Операция'} · ${biz.name}` : (existing ? 'Операция' : 'Новая операция'),
@@ -115,6 +117,7 @@ export function txForm(existing = null, presetType = 'expense', { businessId = n
         delete item.toAccountId;
       }
       await save('transactions', item);
+      if (existing?.merchant && item.categoryId && item.categoryId !== existing.categoryId) await learnRule(existing.merchant, item.categoryId);
       toast(existing ? 'Сохранено' : `${d.type === 'income' ? 'Доход' : d.type === 'transfer' ? 'Перевод' : 'Расход'} ${money(amount)} записан`);
     },
   });
@@ -130,15 +133,23 @@ export function accountForm(existing = null, { businessId = null } = {}) {
     body: `<form class="form">
       <label class="field"><span>Название</span><input name="name" value="${esc(a.name || '')}" placeholder="Например: Наличные, Карта Сбер" required autofocus></label>
       <div class="segmented">
-        ${[['cash', '💵 Наличные'], ['card', '💳 Карта'], ['savings', '🏦 Вклад']].map(([v, l]) => `
+        ${[['cash', 'Наличные'], ['card', 'Карта'], ['savings', 'Вклад']].map(([v, l]) => `
           <label><input type="radio" name="type" value="${v}" ${a.type === v ? 'checked' : ''}><span>${l}</span></label>`).join('')}
       </div>
+      <div class="row gap" data-cardonly>
+        <label class="field grow"><span>Банк</span><input name="bank" value="${esc(a.bank || '')}" placeholder="Например: Kapitalbank"></label>
+        <label class="field" style="width:120px"><span>Последние 4 цифры</span><input name="last4" inputmode="numeric" maxlength="4" pattern="\\d{4}" value="${esc(a.last4 || '')}" placeholder="1234" class="center"></label>
+      </div>
+      <p class="hint" data-cardonly>По последним 4 цифрам Аврора узнаёт карту в SMS банка и сама записывает операции.</p>
       ${amountInput('balance', balance, { label: 'Текущий баланс', allowZero: true, required: false })}
       <button class="btn btn-primary btn-block" type="submit">${existing ? 'Сохранить' : 'Добавить'}</button>
       ${existing ? `<button class="btn btn-ghost btn-block" type="button" data-arch>В архив</button>
         <button class="btn btn-ghost-danger btn-block" type="button" data-del>Удалить счёт</button>` : ''}
     </form>`,
     onMount(el, close) {
+      const form = el.querySelector('form');
+      const sync = () => el.querySelectorAll('[data-cardonly]').forEach((n) => { n.hidden = form.querySelector('input[name=type]:checked')?.value !== 'card'; });
+      form.addEventListener('change', sync); sync();
       el.querySelector('[data-arch]')?.addEventListener('click', async () => {
         await save('accounts', { ...existing, archived: true }); close(); toast('Счёт в архиве');
       });
@@ -153,6 +164,11 @@ export function accountForm(existing = null, { businessId = null } = {}) {
       const desired = d.balance === '' ? 0 : requireAmount(d.balance, { allowZero: true });
       const item = { ...(existing || {}), name: d.name.trim(), type: d.type };
       if (a.businessId) item.businessId = a.businessId;
+      if (d.type === 'card') {
+        const last4 = (d.last4 || '').replace(/\D/g, '').slice(-4);
+        if (last4 && last4.length !== 4) throw new Error('Нужно ровно 4 последние цифры карты');
+        item.last4 = last4 || null; item.bank = (d.bank || '').trim();
+      }
       if (existing) item.initial = (Number(existing.initial) || 0) + (desired - accountBalance(existing.id));
       else item.initial = desired;
       await save('accounts', item);
@@ -163,14 +179,14 @@ export function accountForm(existing = null, { businessId = null } = {}) {
 
 // ---------------- Копилка ----------------
 
-const PIGGY_EMOJI = ['🐷', '🏠', '🚗', '✈️', '🛟', '💍', '📱', '🎓', '💪', '🎁'];
 
 export function piggyForm(existing = null, { onSaved } = {}) {
-  const p = existing || { emoji: '🐷' };
+  const p = existing || { icon: 'piggy' };
+  const curIcon = piggyIcon(p);
   openSheet({
     title: existing ? 'Копилка' : 'Новая копилка',
     body: `<form class="form">
-      <div class="chips">${PIGGY_EMOJI.map((e) => `<label class="chip-radio emoji"><input type="radio" name="emoji" value="${e}" ${p.emoji === e ? 'checked' : ''}><span>${e}</span></label>`).join('')}</div>
+      <div class="chips">${PIGGY_ICONS.map((e) => `<label class="chip-radio glyph"><input type="radio" name="icon" value="${e}" ${curIcon === e ? 'checked' : ''}><span>${icon(e, { size: 20 })}</span></label>`).join('')}</div>
       <label class="field"><span>Название</span><input name="name" value="${esc(p.name || '')}" placeholder="Например: Подушка безопасности" required ${existing ? '' : 'autofocus'}></label>
       ${amountInput('target', p.target, { label: 'Цель (сколько нужно)', required: false })}
       <label class="field"><span>Срок (необязательно)</span><input type="date" name="deadline" value="${esc(p.deadline || '')}"></label>
@@ -190,7 +206,7 @@ export function piggyForm(existing = null, { onSaved } = {}) {
     },
     async onSubmit(d) {
       const item = {
-        ...(existing || {}), name: d.name.trim(), emoji: d.emoji || '🐷',
+        ...(existing || {}), name: d.name.trim(), icon: d.icon || 'piggy',
         target: d.target ? requireAmount(d.target) : null, deadline: d.deadline || null,
       };
       if (!existing) item.initial = d.initial ? requireAmount(d.initial, { allowZero: true }) : 0;
@@ -220,7 +236,7 @@ export function piggyMoveForm(piggy, mode = 'in') {
         type: 'piggy', piggyId: piggy.id, accountId: d.accountId,
         amount: mode === 'in' ? amount : -amount, date: today(),
       });
-      toast(mode === 'in' ? `Отложено ${money(amount)} 🎉` : `Снято ${money(amount)}`);
+      toast(mode === 'in' ? `Отложено ${money(amount)}` : `Снято ${money(amount)}`);
     },
   });
 }
@@ -228,11 +244,11 @@ export function piggyMoveForm(piggy, mode = 'in') {
 // ---------------- Цель ----------------
 
 const KINDS = [
-  ['body', '💪 Тело'], ['money', '🏠 Деньги'], ['mind', '🧠 Мозг и привычки'], ['custom', '🎯 Другое'],
+  ['body', 'Тело'], ['money', 'Деньги'], ['mind', 'Мозг'], ['custom', 'Другое'],
 ];
 
 export function goalForm(existing = null, presetKind = 'body') {
-  const g = existing || { kind: presetKind, emoji: { body: '💪', money: '🏠', mind: '🧠', custom: '🎯' }[presetKind] };
+  const g = existing || { kind: presetKind };
   const metricsMap = Object.fromEntries((g.metrics || []).map((m) => [m.key, m]));
   const piggy = g.piggyId ? byId('piggies', g.piggyId) : null;
   const metricRow = (key) => {
@@ -252,10 +268,7 @@ export function goalForm(existing = null, presetKind = 'body') {
         ${KINDS.map(([v, l]) => `<label><input type="radio" name="kind" value="${v}" ${g.kind === v ? 'checked' : ''} ${existing ? 'disabled' : ''}><span>${l}</span></label>`).join('')}
       </div>
       ${existing ? `<input type="hidden" name="kind" value="${g.kind}">` : ''}
-      <div class="row gap">
-        <label class="field" style="width:72px"><span>Иконка</span><input name="emoji" value="${esc(g.emoji || '🎯')}" maxlength="4" class="center"></label>
-        <label class="field grow"><span>Название</span><input name="title" value="${esc(g.title || '')}" placeholder="Например: Рельеф к лету" required></label>
-      </div>
+      <label class="field"><span>Название</span><input name="title" value="${esc(g.title || '')}" placeholder="Например: Рельеф к лету" required></label>
       <label class="field"><span>Зачем мне это (мотивация)</span><textarea name="why" rows="2" placeholder="Например: чувствовать себя сильным и уверенным">${esc(g.why || '')}</textarea></label>
       <label class="field"><span>Срок (необязательно)</span><input type="date" name="deadline" value="${esc(g.deadline || '')}"></label>
 
@@ -303,7 +316,7 @@ export function goalForm(existing = null, presetKind = 'body') {
     async onSubmit(d) {
       const kind = d.kind;
       const item = {
-        ...(existing || {}), kind, title: d.title.trim(), emoji: d.emoji || '🎯',
+        ...(existing || {}), kind, title: d.title.trim(),
         why: d.why.trim(), deadline: d.deadline || null,
       };
       if (kind === 'body') {
@@ -317,7 +330,7 @@ export function goalForm(existing = null, presetKind = 'body') {
         const target = d.moneyTarget ? requireAmount(d.moneyTarget) : null;
         if (piggy) await save('piggies', { ...piggy, target, deadline: item.deadline, name: item.title });
         else {
-          const p = await save('piggies', { name: item.title, emoji: item.emoji, target, deadline: item.deadline, initial: 0 });
+          const p = await save('piggies', { name: item.title, icon: 'house', target, deadline: item.deadline, initial: 0 });
           item.piggyId = p.id;
         }
       }
@@ -362,7 +375,7 @@ export function metricForm(goal) {
         }
       }
       if (!n) throw new Error('Заполни хотя бы одно значение');
-      toast('Замер сохранён 💪');
+      toast('Замер сохранён');
     },
   });
 }
@@ -382,9 +395,9 @@ export function taskForm(existing = null, preset = {}) {
       </div>
       <label class="field" data-once><span>Когда</span><input type="date" name="due" value="${esc(t.due || '')}"></label>
       <label class="field" data-weekly><span>Сколько раз в неделю</span><select name="timesPerWeek">${[1, 2, 3, 4, 5, 6].map((n) => opt(n, `${n} ${n === 1 ? 'раз' : n < 5 ? 'раза' : 'раз'}`, Number(t.timesPerWeek || 1) === n)).join('')}</select></label>
-      <label class="field"><span>Цель</span><select name="goalId">${opt('', 'Без цели', !t.goalId)}${goals.map((g) => opt(g.id, `${g.emoji} ${g.title}`, g.id === t.goalId)).join('')}</select></label>
+      <label class="field"><span>Цель</span><select name="goalId">${opt('', 'Без цели', !t.goalId)}${goals.map((g) => opt(g.id, g.title, g.id === t.goalId)).join('')}</select></label>
       <label class="field"><span>Заметка</span><textarea name="note" rows="2">${esc(t.note || '')}</textarea></label>
-      <label class="check"><input type="checkbox" name="important" ${t.important ? 'checked' : ''}> ⭐ Важная</label>
+      <label class="check"><input type="checkbox" name="important" ${t.important ? 'checked' : ''}> Важная</label>
       <button class="btn btn-primary btn-block" type="submit">${existing ? 'Сохранить' : 'Добавить'}</button>
       ${existing ? `<button class="btn btn-ghost btn-block" type="button" data-arch>${existing.archived ? 'Вернуть из архива' : 'В архив'}</button>
         <button class="btn btn-ghost-danger btn-block" type="button" data-del>Удалить</button>` : ''}

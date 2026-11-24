@@ -1,6 +1,7 @@
 // Нижние шторки (bottom sheets), уведомления-тосты, подтверждения.
 import { esc } from './util.js';
 import { icon } from './icons.js';
+import { spring, project, rubberband, velocityFrom, reducedMotion } from './motion.js';
 
 const root = () => document.getElementById('sheet-root');
 
@@ -9,31 +10,89 @@ const root = () => document.getElementById('sheet-root');
  * @param {{title:string, body:string, onMount?:(el:HTMLElement, close:Function)=>void, onSubmit?:(data:Object, el:HTMLElement)=>any}} opts
  * Если в body есть <form>, onSubmit получает данные формы; вернёт false — шторка не закроется.
  */
-export function openSheet({ title, body, onMount, onSubmit, wide = false }) {
+export function openSheet({ title, body, onMount, onSubmit, onClose, wide = false }) {
   const wrap = document.createElement('div');
   wrap.className = 'sheet-wrap';
   wrap.innerHTML = `
     <div class="sheet-backdrop" data-close></div>
     <section class="sheet ${wide ? 'sheet-wide' : ''}" role="dialog" aria-modal="true" aria-label="${esc(title)}">
-      <div class="sheet-grab" aria-hidden="true"></div>
-      <header class="sheet-head">
-        <h2>${esc(title)}</h2>
-        <button class="icon-btn" data-close aria-label="Закрыть">${icon('close', { size: 16, w: 2.2 })}</button>
-      </header>
+      <div class="sheet-drag">
+        <div class="sheet-grab" aria-hidden="true"></div>
+        <header class="sheet-head">
+          <h2>${esc(title)}</h2>
+          <button class="icon-btn" data-close aria-label="Закрыть">${icon('close', { size: 16, w: 2.2 })}</button>
+        </header>
+      </div>
       <div class="sheet-body">${body}</div>
     </section>`;
   root().appendChild(wrap);
   document.body.classList.add('sheet-open');
-  requestAnimationFrame(() => wrap.classList.add('open'));
 
-  const close = () => {
-    wrap.classList.remove('open');
-    setTimeout(() => {
-      wrap.remove();
-      if (!root().children.length) document.body.classList.remove('sheet-open');
-    }, 220);
+  const sheet = wrap.querySelector('.sheet');
+  const backdrop = wrap.querySelector('.sheet-backdrop');
+  const calm = reducedMotion();
+  let H = sheet.offsetHeight || window.innerHeight;
+  let y = H; let anim = null; let closing = false;
+  // Позиция шторки и затемнение фона идут вместе, кадр в кадр
+  const render = (v) => {
+    y = v;
+    const p = Math.max(0, Math.min(1, 1 - v / H));
+    if (calm) { sheet.style.opacity = String(p); sheet.style.transform = 'none'; } else sheet.style.transform = `translate3d(0, ${v}px, 0)`;
+    backdrop.style.opacity = String(p);
   };
+  const animateTo = (to, { velocity = 0, damping = 1, response = 0.35, onDone } = {}) => {
+    anim?.stop();
+    anim = spring({ from: y, to, velocity, damping, response: calm ? 0.2 : response, onUpdate: render, onDone });
+  };
+  render(H);
+  requestAnimationFrame(() => { H = sheet.offsetHeight || H; render(H); animateTo(0); }); // открытие: без перелёта
+
+  const close = ({ velocity = 0 } = {}) => {
+    if (closing) return;
+    closing = true;
+    document.removeEventListener('keydown', onKey);
+    onClose?.();
+    sheet.style.pointerEvents = 'none';
+    animateTo(H, {
+      velocity, response: 0.3,
+      onDone: () => { wrap.remove(); if (!root().children.length) document.body.classList.remove('sheet-open'); },
+    });
+  };
+
+  // Перетаскивание за «ручку»: 1:1, с учётом точки захвата, «резинка» вверх, проекция импульса при отпускании
+  const drag = wrap.querySelector('.sheet-drag');
+  let startY = 0; let startPos = 0; let history = []; let dragging = false; let pid = null;
+  drag.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('button')) return;
+    anim?.stop(); // хватаем с текущего положения, даже посреди анимации
+    pid = e.pointerId; startY = e.clientY; startPos = y; history = [{ y: e.clientY, t: e.timeStamp }]; dragging = false;
+    drag.setPointerCapture(pid);
+  });
+  drag.addEventListener('pointermove', (e) => {
+    if (e.pointerId !== pid) return;
+    const dy = e.clientY - startY;
+    if (!dragging && Math.abs(dy) < 6) return; // небольшой гистерезис
+    dragging = true;
+    let next = startPos + dy;
+    if (next < 0) next = rubberband(next, H); // вверх тянется с сопротивлением
+    render(next);
+    history.push({ y: e.clientY, t: e.timeStamp });
+    if (history.length > 8) history.shift();
+  });
+  const release = (e) => {
+    if (e.pointerId !== pid) return;
+    pid = null;
+    if (!dragging) { animateTo(0); return; }
+    const v = velocityFrom(history);
+    const projected = y + project(v);
+    if (projected > H * 0.45 || v > 900) close({ velocity: v });
+    else animateTo(0, { velocity: v, damping: 0.8, response: 0.3 }); // после импульса — лёгкий пружинящий возврат
+  };
+  drag.addEventListener('pointerup', release);
+  drag.addEventListener('pointercancel', release);
   wrap.addEventListener('click', (e) => { if (e.target.closest('[data-close]')) close(); });
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', onKey);
 
   const form = wrap.querySelector('form');
   if (form && onSubmit) {
@@ -87,10 +146,8 @@ export function confirmSheet(title, text, { ok = 'Удалить', danger = true
         </div>`,
       onMount(el) {
         el.querySelector('[data-ok]').onclick = () => { answered = true; resolve(true); close(); };
-        el.addEventListener('click', (e) => {
-          if (e.target.closest('[data-close]') && !answered) resolve(false);
-        });
       },
+      onClose() { if (!answered) resolve(false); },
     });
   });
 }
@@ -111,6 +168,6 @@ export function ring(value, size = 56, stroke = 6) {
 
 export const bar = (value) => `<div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round((value || 0) * 100)}"><span style="width:${Math.round((value || 0) * 100)}%"></span></div>`;
 
-export function emptyState(emoji, title, text, actionHtml = '') {
-  return `<div class="empty"><div class="empty-emoji">${emoji}</div><h3>${esc(title)}</h3><p class="muted">${esc(text)}</p>${actionHtml}</div>`;
+export function emptyState(iconName, title, text, actionHtml = '') {
+  return `<div class="empty"><div class="empty-icon">${icon(iconName, { size: 30, w: 1.6 })}</div><h3>${esc(title)}</h3><p class="muted">${esc(text)}</p>${actionHtml}</div>`;
 }

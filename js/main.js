@@ -1,6 +1,7 @@
 // Точка входа: загрузка данных, маршрутизация по вкладкам, обработка нажатий.
 import { load, state, subscribe, seedBusinesses } from './store.js';
 import { icon } from './icons.js';
+import { runSync } from './bankui.js';
 import { toast } from './ui.js';
 import * as today from './views/today.js';
 import * as money from './views/money.js';
@@ -95,6 +96,7 @@ subscribe(() => {
 // Новый день — обновить «Сегодня», когда приложение возвращается из фона
 let lastDay = new Date().toDateString();
 document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') runSync();
   if (document.visibilityState === 'visible' && new Date().toDateString() !== lastDay) {
     lastDay = new Date().toDateString();
     render({ keepScroll: true });
@@ -122,8 +124,17 @@ async function registerSW() {
   }
 }
 
+// На iOS :active срабатывает мгновенно только при наличии touchstart-слушателя
+document.addEventListener('touchstart', () => {}, { passive: true });
+
+let lastTheme = null;
 export function applyTheme() {
   const t = state.settings.theme || 'system';
+  if (lastTheme && lastTheme !== t) {
+    document.documentElement.classList.add('theme-fade');
+    setTimeout(() => document.documentElement.classList.remove('theme-fade'), 350);
+  }
+  lastTheme = t;
   if (t === 'system') document.documentElement.removeAttribute('data-theme');
   else document.documentElement.dataset.theme = t;
   const dark = t === 'dark' || (t === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
@@ -137,12 +148,13 @@ window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', a
     await load();
     applyTheme();
     if (state.settings.onboarded) await seedBusinesses();
+    setTimeout(runSync, 800); // забрать операции из банка, если включён автоимпорт
     // Просим браузер не удалять данные при нехватке места
     navigator.storage?.persist?.().catch(() => {});
     render();
     registerSW();
   } catch (e) {
     console.error(e);
-    viewEl.innerHTML = `<div class="empty"><div class="empty-emoji">⚠️</div><h3>Не удалось загрузить данные</h3><p class="muted">${e.message}</p></div>`;
+    viewEl.innerHTML = `<div class="empty"><div class="empty-icon">${icon('warning', { size: 30 })}</div><h3>Не удалось загрузить данные</h3><p class="muted">${e.message}</p></div>`;
   }
 }());

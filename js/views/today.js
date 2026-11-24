@@ -2,7 +2,8 @@ import {
   state, active, totalBalance, totalSaved, monthStats, todayTasks, isDone, toggleTask,
   goalProgress, streak, byId, bizMonthStats, duePayments, clientName,
 } from '../store.js';
-import { icon } from '../icons.js';
+import { icon, tile } from '../icons.js';
+import { dueSteps } from '../deals.js';
 import { smartTips, dailyTip } from '../tips.js';
 import { money, moneyShort, greeting, esc, today, fullDate } from '../util.js';
 import { ring } from '../ui.js';
@@ -46,7 +47,7 @@ export function render() {
 
   ${tips.length ? `<section class="section">
     <h2 class="section-title">Подсказки</h2>
-    <div class="tips">${tips.map((t) => `<button class="tip" data-action="nav" data-to="${t.tab}"><span class="tip-icon">${t.icon}</span><span>${esc(t.text)}</span></button>`).join('')}</div>
+    <div class="tips">${tips.map((t) => `<button class="tip" data-action="nav" data-to="${t.tab}"><span class="tip-icon">${icon(t.icon, { size: 20 })}</span><span>${esc(t.text)}</span></button>`).join('')}</div>
   </section>` : ''}
 
   <section class="section">
@@ -54,9 +55,9 @@ export function render() {
     ${tasks.length ? `<ul class="checklist">${tasks.slice(0, 8).map((t) => {
       const done = isDone(t); const st = streak(t); const g = t.goalId ? byId('goals', t.goalId) : null;
       return `<li class="${done ? 'done' : ''}">
-        <button class="check-btn" data-action="toggle-task" data-id="${t.id}" aria-label="${done ? 'Снять отметку' : 'Отметить выполненной'}">${done ? '✓' : ''}</button>
-        <div class="grow"><span class="task-title">${t.important ? '⭐ ' : ''}${esc(t.title)}</span>
-          <span class="task-meta">${g ? esc(g.emoji + ' ' + g.title) : ''}${st > 1 ? ` · 🔥 ${st}` : ''}${t.due && t.due < today() && !done ? ' · <span class="neg">просрочено</span>' : ''}</span></div>
+        <button class="check-btn" data-action="toggle-task" data-id="${t.id}" aria-label="${done ? 'Снять отметку' : 'Отметить выполненной'}">${done ? icon('check', { size: 14, w: 3 }) : ''}</button>
+        <div class="grow"><span class="task-title">${t.important ? icon('star', { size: 14, w: 2, cls: 'inline' }) + ' ' : ''}${esc(t.title)}</span>
+          <span class="task-meta">${g ? esc(g.title) : ''}${st > 1 ? ` · ${icon('flame', { size: 12, w: 2, cls: 'inline' })} ${st}` : ''}${t.due && t.due < today() && !done ? ' · <span class="neg">просрочено</span>' : ''}</span></div>
       </li>`;
     }).join('')}</ul>` : `<button class="card empty-mini" data-action="add-task">На сегодня задач нет. Добавить?</button>`}
   </section>
@@ -68,8 +69,8 @@ export function render() {
     ${goals.length ? `<div class="hscroll">${goals.map((g) => `
       <button class="goal-mini card" data-action="nav" data-to="goals">
         ${ring(goalProgress(g), 54, 6)}
-        <span class="goal-mini-title">${esc(g.emoji)} ${esc(g.title)}</span>
-      </button>`).join('')}</div>` : `<button class="card empty-mini" data-action="add-goal">Поставь первую цель 🎯</button>`}
+        <span class="goal-mini-title">${esc(g.title)}</span>
+      </button>`).join('')}</div>` : `<button class="card empty-mini" data-action="add-goal">Поставь первую цель</button>`}
   </section>
 
   <section class="card tip-day">
@@ -83,6 +84,7 @@ function bizBlock() {
   const list = active('businesses');
   if (!list.length) return '';
   const due = duePayments(null, 0);
+  const steps = dueSteps();
   return `<section class="section">
     <div class="section-head"><h2 class="section-title">Бизнес</h2><button class="link" data-action="nav" data-to="business">Открыть</button></div>
     <ul class="list card">${list.map((b) => {
@@ -93,9 +95,12 @@ function bizBlock() {
         ${icon('chevron', { size: 16, cls: 'muted' })}</li>`;
     }).join('')}
     ${due.map((s) => `<li class="row-item" data-action="nav" data-to="business">
-        <span class="row-icon warn">${icon('repeat', { size: 18 })}</span>
+        ${tile('repeat', 'warn')}
         <div class="grow"><span class="row-title">${esc(clientName(s.clientId) || s.title || 'Платёж')}</span><span class="row-sub neg">${s.nextDate < today() ? 'Просрочен платёж' : 'Платёж сегодня'} · ${esc(byId('businesses', s.businessId)?.name || '')}</span></div>
         <span class="row-amount">${money(s.amount)}</span></li>`).join('')}
+    ${steps.map((d) => `<li class="row-item" data-action="nav" data-to="business">
+        ${tile('clock', d.nextDate < today() ? 'warn' : '')}
+        <div class="grow"><span class="row-title">${esc(d.nextStep)}</span><span class="row-sub ${d.nextDate < today() ? 'neg' : ''}">${esc(d.title)} · ${esc(byId('businesses', d.businessId)?.name || '')}</span></div></li>`).join('')}
     </ul>
   </section>`;
 }

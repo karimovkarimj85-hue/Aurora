@@ -2,7 +2,7 @@ import {
   state, active, byId, remove, goalProgress, metricEntries, latestMetric, metricProgress, habitStats,
   piggySaved, METRIC_PRESETS, streak, isDone, toggleTask, save, weekProgress,
 } from '../store.js';
-import { icon } from '../icons.js';
+import { tile, GOAL_ICON, icon } from '../icons.js';
 import { esc, num, money, humanDate, today, addDays, daysBetween, plural, parseIso } from '../util.js';
 import { ring, bar, openSheet, emptyState, confirmSheet, toast } from '../ui.js';
 import { lineChart, columns } from '../charts.js';
@@ -47,7 +47,7 @@ function screenTimeSection() {
   const avg = withData.length ? withData.reduce((a, b) => a + b.value, 0) / withData.length : 0;
   const lastEntry = entries[entries.length - 1];
   return `<section class="section">
-    <div class="section-head"><h2 class="section-title">📱 Экранное время</h2><button class="link" data-action="add-screentime">＋ Добавить</button></div>
+    <div class="section-head"><h2 class="section-title">Экранное время</h2><button class="link" data-action="add-screentime">＋ Добавить</button></div>
     <div class="card">
       ${entries.length ? `
         <p class="muted">В среднем за неделю: <b>${num(avg, true)} ч/день</b></p>
@@ -73,13 +73,13 @@ export function render() {
         ${ring(p, 64, 7)}
         <div class="grow">
           <p class="eyebrow">${KIND_LABEL[g.kind]}${g.deadline ? ' · ' + esc(deadlineText(g)) : ''}</p>
-          <h3>${esc(g.emoji)} ${esc(g.title)}</h3>
+          <h3>${icon(GOAL_ICON[g.kind] || 'target', { size: 18, cls: 'inline' })} ${esc(g.title)}</h3>
           ${g.why ? `<p class="muted small">«${esc(g.why)}»</p>` : ''}
         </div>
       </div>
       <div class="pills">${goalSummary(g)}</div>
     </article>`;
-  }).join('') : emptyState('🎯', 'Целей пока нет', 'Поставь цель: рельефное тело, ясная голова, свой дом. Аврора будет считать прогресс.',
+  }).join('') : emptyState('target', 'Целей пока нет', 'Поставь цель: рельефное тело, ясная голова, свой дом. Аврора будет считать прогресс.',
     '<button class="btn btn-primary" data-action="add-goal">Поставить цель</button>')}
   ${screenTimeSection()}
   `;
@@ -117,7 +117,7 @@ function openGoal(g) {
   if (g.kind === 'money') {
     const pg = byId('piggies', g.piggyId);
     if (pg) {
-      body += `<section class="card flat"><p>${pg.emoji} В копилке: <b>${money(piggySaved(pg.id))}</b>${pg.target ? ` из ${money(pg.target)}` : ''}</p>
+      body += `<section class="card flat"><p>В копилке: <b>${money(piggySaved(pg.id))}</b>${pg.target ? ` из ${money(pg.target)}` : ''}</p>
         ${pg.target ? bar(piggySaved(pg.id) / pg.target) : ''}
         <div class="row gap mt"><button class="btn btn-primary grow" data-act="piggy-in">＋ Отложить</button>
         <button class="btn btn-ghost grow" data-act="piggy-out">Забрать</button></div></section>`;
@@ -127,11 +127,11 @@ function openGoal(g) {
   if (g.kind === 'mind' || g.kind === 'custom') {
     body += habitsBlock(active('tasks').filter((t) => t.goalId === g.id), g);
   }
-  body += `<div class="row gap mt"><button class="btn btn-ghost grow" data-act="edit">✏️ Изменить</button>
-    <button class="btn btn-ghost grow" data-act="archive">🗄 В архив</button></div>`;
+  body += `<div class="row gap mt"><button class="btn btn-ghost grow" data-act="edit">Изменить</button>
+    <button class="btn btn-ghost grow" data-act="archive">В архив</button></div>`;
 
   openSheet({
-    title: `${g.emoji} ${g.title}`,
+    title: g.title,
     body,
     wide: true,
     onMount(el, close) {
@@ -165,8 +165,8 @@ function habitsBlock(tasks, g) {
     <div class="section-head"><h3 class="card-title">Привычки и задачи</h3><button class="link" data-act="habit">＋ Добавить</button></div>
     ${tasks.length ? `<ul class="checklist">${tasks.map((t) => {
       const done = isDone(t); const st = streak(t);
-      return `<li class="${done ? 'done' : ''}"><button class="check-btn" data-toggle="${t.id}" aria-label="Отметить">${done ? '✓' : ''}</button>
-        <div class="grow"><span class="task-title">${esc(t.title)}</span><span class="task-meta">${t.repeat === 'daily' ? 'каждый день' : t.repeat === 'weekly' ? `${weekProgress(t).done}/${weekProgress(t).target} на неделе` : (t.due ? esc(humanDate(t.due)) : '')}${st > 1 ? ` · 🔥 ${st}` : ''}</span></div></li>`;
+      return `<li class="${done ? 'done' : ''}"><button class="check-btn" data-toggle="${t.id}" aria-label="Отметить">${done ? icon('check', { size: 14, w: 3 }) : ''}</button>
+        <div class="grow"><span class="task-title">${esc(t.title)}</span><span class="task-meta">${t.repeat === 'daily' ? 'каждый день' : t.repeat === 'weekly' ? `${weekProgress(t).done}/${weekProgress(t).target} на неделе` : (t.due ? esc(humanDate(t.due)) : '')}${st > 1 ? ` · ${icon('flame', { size: 12, w: 2, cls: 'inline' })} ${st}` : ''}</span></div></li>`;
     }).join('')}</ul>` : `<p class="muted small">${g.kind === 'body' ? 'Например: «Силовая тренировка», «Белок 150 г», «10 000 шагов».' : 'Добавь ежедневные действия, которые приближают к цели.'}</p>`}
   </section>`;
 }
@@ -176,7 +176,7 @@ function listScreentime() {
   const close = openSheet({
     title: 'Экранное время',
     body: `<ul class="list card">${entries.map((e) => `<li class="row-item" data-st="${e.id}">
-      <span class="row-icon">📱</span><div class="grow"><span class="row-title">${esc(humanDate(e.date))}</span>
+      ${tile('phoneapp')}<div class="grow"><span class="row-title">${esc(humanDate(e.date))}</span>
       <span class="row-sub">${esc((e.apps || []).slice(0, 3).map((a) => a.name).join(', '))}</span></div>
       <span class="row-amount">${Math.floor(e.totalMinutes / 60)} ч ${e.totalMinutes % 60} мин</span></li>`).join('')}</ul>`,
     onMount(el) {
